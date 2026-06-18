@@ -1,0 +1,55 @@
+# ── 系列設定（驅動整個製作流程）──────────────────
+title: "我的系列"              # 系列名稱
+episode_title_pattern: "第 {N} 集"
+channel: "你的 YouTube 頻道名"
+language: zh-Hant
+length_target_min: 7           # 每集目標分鐘數
+
+# 主持人聲音（MiniMax 克隆聲）
+voice:
+  provider: minimax
+  voice_id: "moss_audio_xxxxxxxx"   # 你的克隆聲 ID
+  speed: 1.15
+  emotion: happy                    # happy / neutral / ...
+  vol: 1.0
+  pitch: 0
+# 旁白口吻指南：見 ./voice-style.md（丟語料我可幫你抽）
+
+# 視覺風格（Remotion）
+visual:
+  style: keynote-blue       # 預設：極簡科技藍 keynote
+  primary: "#2563EB"
+  sky: "#0EA5E9"
+  bg: "#FAFBFC"
+
+# 素材來源（每集的講解依據）
+source:
+  kind: local               # local | github
+  # kind: local →
+  map: "source/ep{N}.md"    # 第 N 集素材檔（{N} 補零成兩位）
+  # kind: github → 改成：
+  # kind: github
+  # repo: "owner/name"
+  # ref: main
+  # doc_glob: "docs/chapter{N}/*.md"   # 第 N 集講解原文
+  # code_glob: "code/chapter{N}/*"     # 第 N 集 demo 程式碼（可選）
+
+# 片頭（每集共用的品牌片頭影片；沒有就留空，會用純標題卡）
+intro: "brand/intro.mp4"
+
+# BGM
+bgm:
+  intro_preset: intro       # 磅礴片頭樂
+  body_preset: body         # 輕柔本體樂
+  body_volume: 0.15
+
+# 授權與署名（合規必填）
+license: "CC-BY-NC-SA-4.0"
+attribution: "改編自 ⟨來源名稱⟩"
+source_url: "https://..."
+commercial: false           # 非商業 → 不開營利
+
+# YouTube
+youtube:
+  category_id: "27"         # 27=教育, 28=科技
+  privacy_default: public
