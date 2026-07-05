@@ -34,7 +34,8 @@
 - 元件：`remotion/src/components.tsx`(Reveal/SceneTitle/Chip/Card)、`theme.ts`、`fonts.ts`(codeFamily)。每集寫 `scenesNN.tsx` + `EpisodeNN.tsx`（從 manifest `epNNData.ts` 的 EP NN 自動排場景）+ 註冊 `Root.tsx`。
 - 共用 `Narration`/`Subtitles`（吃 `cues` prop）。
 - **字幕 cues 必用真實語音時間戳（自動校正斷句）**：配音定稿後跑 `python3 tools/build_subtitle_cues.py --ep N`（whisper 每段 wav → srt → `voiceover/cues/epNN_cues.json`，`fromF/toF`＝真實語音時間、依語音停頓自然斷句）。字幕進出時間**一律取自此 cues，嚴禁用字數比例估算**（會「聲音比字幕快／字幕飄」）。cues 的 `text` 是 whisper 轉錄（base 有同音/技術詞錯），技術詞/人名對照 `script.md`【旁白】校正後再上字幕。有 `_short` 剪輯版的場景自動採用其 srt。
-- **實機 demo 螢幕錄影**（macOS）：⚠️先把輸入法切 ABC（`osascript ... key code 49 using control`）否則 keystroke 全形；用 `/opt/anaconda3/bin/python3`；`ffmpeg -f avfoundation -i "2"` 錄螢幕（需 Terminal 螢幕錄製權限）→ 裁終端機放大 + `tpad` 凍結補長 → `OffthreadVideo` 嵌入（明確尺寸、別蓋標題）。
+- **實機 demo（終端類）預設用合成 asciicast 鏈**（2026-06 EP6 起）：`generate_*_cast.py` 手工合成 asciicast v2（模仿 Claude Code TUI）→ `agg`（字體必含 Heiti TC）→ ffmpeg mp4。**鐵則：數字必須由實機真跑回填、絕不捏造**；畫面可合成。可重跑、無輸入法/睡眠/權限雷。工具鏈範例：colon-and-code `tools/capture/`（含 README、安全護欄：中性 prompt、不露 email/hostname）。
+- **真錄螢幕**（GUI/需要真螢幕的橋段，macOS）：⚠️先把輸入法切 ABC（`osascript ... key code 49 using control`）否則 keystroke 全形；用 `/opt/anaconda3/bin/python3`；`ffmpeg -f avfoundation -i "2"` 錄螢幕（需 Terminal 螢幕錄製權限）→ 裁終端機放大 + `tpad` 凍結補長 → `OffthreadVideo` 嵌入（明確尺寸、別蓋標題）。
 - **渲染＝逐場景輸出 + concat（標準流程，所有影片 agent 一律照做）**：本體**不要**整集一次渲染（改一個字得重跑數萬幀）。每個場景渲成獨立 mp4（`render/scenes/sNN.mp4`，全部用**相同編碼參數**：libx264 / yuv420p / 同 fps / 同解析度 / 同音訊參數），本體＝`ffmpeg -f concat -c copy` 拼接這些場景 mp4（拼接僅數秒）。
   - **迭代只重渲改到的場景**：作者挑出「sceneNN 哪裡不對」→ 只重渲那一支 `sNN.mp4`（分鐘級）→ 重 concat（秒級）。嚴禁為了一個小改動重渲整片。
   - 單場景渲染：獨立 composition，或 `npx remotion render src/index.ts EpNN render/scenes/sNN.mp4 --frames=<startF>-<endF>`。

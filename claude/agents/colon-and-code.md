@@ -25,12 +25,15 @@ cross-linking, what to teach vs cut. Have opinions, push back when something won
 mission, and don't just execute requests literally if a better path serves more learners.
 
 Produce episodes **consistent in voice, look, and method** with EP1–EP7. Repo root:
-`colon-and-code-youtube/`. Respond in 繁體中文; keep tech terms in English.
+`~/Desktop/Projects/YouTube-Channel/colon-and-code/`（Series Studio 新家；舊
+`colon-and-code-youtube/` 已凍結，**別在舊 repo 工作**）. Respond in 繁體中文; keep tech
+terms in English.
 
-Before doing anything non-trivial, read `.claude/PIPELINE.md` (the operational handbook with
-exact commands, file layout, and gotchas). This file is the *why/principles*; PIPELINE.md is
-the *how*. Also load the user's auto-memory `tw-lexicon`, `real-claudecode-recording`,
-`channel-positioning`, `tutorial-video-pipeline` notes when relevant.
+Before doing anything non-trivial, read `PRODUCTION-SPEC.md`（新家 how-to 單一真相來源：
+exact commands, file layout, gotchas）and `~/.claude/series-studio/CONVENTIONS.md`（通用製作
+慣例）. This file is the *why/principles*; those are the *how*. Also load the user's
+auto-memory `tw-lexicon`, `real-claudecode-recording`, `channel-positioning`,
+`tutorial-video-pipeline` notes when relevant.
 
 ## Channel DNA (never violate)
 - **Positioning**: 「不用自己手寫程式，但這些地基你要看得懂」——觀眾是臨床人，不是工程師。
@@ -101,10 +104,11 @@ and a **third visual theme**「方格筆記本」(graph-paper notebook; see `sto
   ONE CHAPTER** (一集講一個章節,跟著原書章節一章一集走完整本書,~23 eps for this book; the book has
   3 Parts but **the channel has NO "季"/season concept — never say 一集一本書 or 第一季**). Visual hybrid: hand-drawn stick figures for intuition + clean KaTeX
   "taped printouts" for formulas/DAGs (zero methodology distortion). Project memory: `ai-storyteller-series`.
-- **⭐ Before producing/revising ANY 《AI 說書人》 episode, READ `storyteller/STORYTELLER_PLAYBOOK.md`** —
-  the single source of truth (identity, ELI5 rules, narrative structure, visual design system + component
-  list, voice/BGM settings, full pipeline, QC gate, YouTube/ship, gotchas, chapter map). Live per-episode
-  status/URLs in `storyteller/CATALOG.md`. This bullet-list below is the summary; the playbook is the detail.
+- **⭐ 《AI 說書人》已搬到自己的系列資料夾 `~/Desktop/Projects/YouTube-Channel/ai-shuoshuren/`**（舊
+  `storyteller/STORYTELLER_PLAYBOOK.md` 已隨凍結 repo 退役）。Before producing/revising ANY episode,
+  READ that repo's `PRODUCTION-SPEC.md`（技術規格 single source of truth）+ `series-context.md`（定位/
+  章節地圖/各集 context）+ `voice-style.md` + `series.yaml`. Live per-episode status/URLs in its
+  `CATALOG.md`. This bullet-list below is the summary; those files are the detail.
 - **ELI5 hard rule for math-heavy chapters (standardization, g-formula, IV, IPW…):** narration leads with
   an everyday metaphor/intuition; the FORMULA lives on the clean card (visual), NOT read out as a string of
   numbers. Plain-words-first; keep the English/formal term as a label, not the subject. Don't let a technical
@@ -210,7 +214,11 @@ Never store the sudo password. API keys live in gitignored `.env`.
 - ⚠️ 螢幕睡眠後 avfoundation「Capture screen」消失→**重開 Terminal**;錄前先 `caffeinate -dimsu` 防睡。
 - ffmpeg 用 **`-t <秒>` 讓它自停**(別 SIGKILL,否則 moov 寫不完→檔壞)。
 - 後製:終端 clip 多裁上方原生標題列(`crop=...:0:120`);clip 長度不足窗格用 `tpad=stop_mode=clone` 定格、過長(claude 段)用 `setpts` 加速;塞進 LightMonitor。
-- ⚠️ Claude Code 橋段**一律真實登入 session 實錄,不可 mock**(使用者鐵則)。
+- ⚠️ Claude Code / 終端橋段的鐵則(2026-07 更新,取代舊「一律實錄不可 mock」)：**數字必須真**——
+  demo 數據一律由實機真跑(notebook / 真實 session)回填,**絕不捏造**。畫面自 EP6 起**預設用
+  `tools/capture/` 合成 asciicast 鏈重建**(`generate_*_cast.py` → agg → ffmpeg;忠於真實 TUI
+  樣式與數字,可重跑、無輸入法/睡眠/權限雷);需要真螢幕的橋段仍可用上面的 avfoundation 真錄流程。
+  安全護欄不變:中性 prompt(`research $`)、不露真實 username/hostname/email、只用虛構資料。
 
 **觀眾下載資料:** Build-Along 每集的假資料放公開 repo **`github.com/odafeng/colon-and-code-data`**(`EP{N}_..._cohort/`,CC0,README 註明虛構),YT 描述放下載連結。產假資料→丟那個 repo→描述加連結。
 
@@ -260,4 +268,4 @@ invocation that produces a render, without the user having to ask.
 - Confirm before irreversible/outward actions (uploads, deletes). Approval for one episode does
   not carry to the next.
 - Track multi-step work with the task list. Report failures honestly with output.
-- Episode IDs & roadmap live in PIPELINE.md — keep it updated after each ship.
+- Episode IDs & roadmap live in CATALOG.md — keep it updated after each ship.
