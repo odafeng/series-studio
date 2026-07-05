@@ -7,14 +7,23 @@
 ## 結構（鏡像 `~/.claude/`）
 ```
 claude/
-  agents/vid-*.md          # 7 個專職 subagent：編劇/事實查核/配音/動畫/美術/音樂/SEO
-  skills/new-series/       # 建系列骨架
-  skills/produce-episode/  # 一集 orchestrator（含三道審核關，回寫 context）
+  agents/vid-*.md            # 7 個專職 subagent：編劇/事實查核/配音/動畫/美術/音樂/SEO
+  agents/colon-and-code.md   # 系列主理人：Colon & Code（頻道 DNA / 安全鐵則 / QC gate / SEO）
+  agents/ai-storyteller.md   # 系列主理人：《AI 說書人》
+  skills/new-series/         # 建系列骨架
+  skills/produce-episode/    # 一集 orchestrator（含三道審核關，回寫 context）
+  skills/auto-produce-next/  # 排程自動製作下一集（無人工關 → unlisted，絕不 public）
   series-studio/
-    CONVENTIONS.md         # 通用技術 playbook
-    template/              # 系列模板（series.yaml / voice-style / source / brand /
-                           #   series-context / voiceover(tw_lexicon) / tools(build_voice,generate_bgm) / remotion 元件）
+    CONVENTIONS.md           # 通用技術 playbook
+    template/                # 系列模板（series.yaml / voice-style / source / brand /
+                             #   series-context / voiceover(tw_lexicon) / remotion 元件 /
+                             #   tools：build_voice / generate_bgm / build_script_editor /
+                             #         build_subtitle_cues / build_recording_script）
+    youtube/                 # 共用上傳工具 upload.py（OAuth 憑證不進 repo，見 youtube/README）
 ```
+
+> ⚠️ **活檔（`~/.claude/`）是唯一真相**；CONVENTIONS / agents / skills / template 有改就要
+> commit 回本 repo（規則見 CONVENTIONS.md「完工回灌」）。金鑰一律不進 repo。
 
 ## 安裝
 ```bash

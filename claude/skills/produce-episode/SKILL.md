@@ -11,9 +11,10 @@ description: 製作目前系列資料夾的某一集（通用 orchestrator / 製
 ## 流程與審核關（🚪 = 停下等使用者明說 OK 才往下）
 1. **vid-screenwriter**：取第 N 集素材、寫 `episodes/epNN/script/epNN-script.md`（本人口吻、忠於素材、**接 series-context**：不重複、回呼前集、兌現上集預告）。
 2. **vid-factchecker**：對素材逐點核；不過退回 1。
-3. 🚪 **腳本關**：轉 HTML 給使用者過目。
+3. 🚪 **腳本關**：`python3 tools/build_script_editor.py --ep N` 產**可編輯**的腳本編輯器 HTML，open 給使用者直接改旁白／插入自己的段落；使用者「匯出 Markdown」後用 edited.md 覆蓋 `epNN-script.md`（先 diff）。等使用者明說 OK 才往下。
 4. **vid-voice**：`tools/build_voice.py --ep N` 逐句合成、破音字詞庫、斷句改寫。
-5. 🚪 **純音檔 QC 關**：concat 旁白給使用者聽，鎖定發音（QuickTime quit 再 open）。
+   - **4b. 斷句 QC 關卡（render 前必跑，別省）**：**主用字級 forced-align 偵測器** `voiceover/.venv-phrasing/bin/python voiceover/forced_align_phrasing.py --ep N`（exit 1=有缺陷、0=乾淨）。字級對齊拿每字精準時間＋silencedetect＋jieba(內建繁→簡)，**精準列出「詞中間被唸斷」的真缺陷、不噴假陽性**（取代舊 whisper `phrasing_gate.py` 人工判候選——後者 ±1 字飄移會誤判、短句會漏，可留作輔助）。修法：刪偵測到的 cue mp3（破音字另補 `tw_lexicon.json`）→ `build_voice.py --ep N` 重合成（fresh take 通常一次修乾淨）→ **重跑偵測器確認歸 0**。⚠️ 重合成會位移後續 cue，若落在前言乾聲段（第一個正片場景前），組裝 BOUND 要用新 startF 重算、本體要重渲。
+5. 🚪 **純音檔 QC 關**：concat 旁白給使用者聽，鎖定發音（QuickTime quit 再 open）。斷句已由 4b 把關，這關專注**發音／破音字／語氣**。
 6. **並行**：vid-music（BGM，片頭/本體可沿用）｜ vid-animator（scenesNN/EpisodeNN、實機 demo、render）｜ vid-art-director（審視覺，退件則動畫師修）。
 7. **組裝**：前言+片頭+本體(ducking) → `episodes/epNN/render/epNN_final.mp4`。
 8. **vid-seo**：metadata（章節時間戳組裝後重算）、置頂留言；縮圖交動畫師渲。
