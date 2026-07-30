@@ -41,6 +41,59 @@ def load_colors():
     return c
 
 
+def license_markers():
+    """從 series.yaml 抓授權署名的關鍵字，當作「不准掉」的護欄依據。"""
+    marks = []
+    p = Path("series.yaml")
+    if p.exists():
+        txt = p.read_text(encoding="utf-8")
+        for key in ("license", "source_url"):
+            m = re.search(rf'^\s*{key}:\s*["\']?([^"\'\n]+)', txt, re.M)
+            if m:
+                v = m.group(1).strip()
+                marks.append(v.replace("https://", "").replace("http://", ""))
+        m = re.search(r'^\s*attribution:\s*["\']?([^"\'\n]+)', txt, re.M)
+        if m:
+            # 取作者姓名那一段當指紋（整串太長、易因排版換行而誤判）
+            a = re.search(r'改編自\s*([^（(]+)', m.group(1))
+            if a:
+                marks.append(a.group(1).strip())
+    return [x for x in marks if x]
+
+
+def _tail_credit(data):
+    """片尾場景所有【畫面】指示串起來——授權 credit 就該長在這裡。
+
+    只掃「整份 md 有沒有這些字」是無效護欄：作者名／Apache-2.0 在標頭註解和
+    開場旁白裡也會出現，片尾 credit 整段被吃掉時照樣「找得到」。
+    """
+    scenes = [d for d in data if d["type"] == "scene"]
+    if not scenes:
+        return ""
+    return "\n".join(b.get("screen", "") for b in scenes[-1].get("blocks", []))
+
+
+def assert_license_survives(md):
+    """片尾授權署名必須存在，且要能撐過 parse→匯出。
+
+    Apache-2.0 要求保留署名。這段藏在【畫面】續行裡，掉了畫面上不會少一塊、
+    人眼看不出來，所以每次 build 都硬檢查一次。
+    """
+    marks = license_markers()
+    if not marks:
+        return []
+    tail = _tail_credit(parse_script(md))
+    missing = [m for m in marks if m not in tail]
+    if missing:
+        return [f"🛑 片尾【畫面】的授權 credit 缺少：{'、'.join(missing)}"
+                "（Apache-2.0 要求保留署名，請補回最後一個場景的 credit）"]
+    tail_rt = _tail_credit(parse_script(build_md(parse_script(md))))
+    lost = [m for m in marks if m not in tail_rt]
+    if lost:
+        return [f"🛑 授權署名撐不過 parse→匯出，會被靜悄悄吃掉：{'、'.join(lost)}"]
+    return []
+
+
 def parse_script(md):
     """把腳本 md 解析成 [{type, ...}]。type: head/scene/marker/license。"""
     lines = md.split("\n")
@@ -402,7 +455,13 @@ def main():
                 for b in it.get("blocks", []))
     print(f"✓ 已生成 {out}")
     print(f"  場景數：{scenes}｜旁白約 {words} 字｜約 {words / (4.3 * 60):.1f} 分")
+    problems = assert_license_survives(md)
+    for p_ in problems:
+        print("  " + p_)
+    if problems:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
