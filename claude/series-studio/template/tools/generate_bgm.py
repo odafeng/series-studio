@@ -3,7 +3,7 @@
 model `music-2.6` + is_instrumental:true（純樂器、無人聲，單次最長 ~3 分鐘）。
 之後用 ffmpeg -stream_loop 接到 ≥ 影片長度，再做 ducking 混音。
 """
-import argparse, json, sys, urllib.request, urllib.error
+import argparse, json, re, sys, urllib.request, urllib.error
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -24,7 +24,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--preset", choices=list(PRESETS), default="body")
 ap.add_argument("--out")
 args = ap.parse_args()
-PROMPT = PRESETS[args.preset]
+PROMPT = series_prompt(args.preset) or PRESETS[args.preset]
 OUT = Path(args.out) if args.out else ROOT / "remotion" / "public" / "audio" / f"bgm_{args.preset}_seed.mp3"
 
 payload = {

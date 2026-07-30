@@ -31,9 +31,19 @@
 - 斷句怪／詞被切開 → **改寫腳本**（非詞庫）。
 - **🚪 斷句 QC（render 前必做，每集沿用；2026-06 EP6 定案）**：MiniMax 常把詞中插微停頓（治療→「治｜療」、約定→「約｜定」）。判官**一律用 `voiceover/verify_phrasing.py`**（ffmpeg 物理偵測真實靜音＋whisper 只定位→jieba 判詞內），**不要信 `phrasing_gate.py`**——後者用 whisper 內插字級時間、±1 字漂移、**大量把標點旁停頓誤報成詞內切（假陽性）**，照它修會狂修假陽性又漏真缺陷。
   - ⚠️ `verify_phrasing.py` 內 `WhisperModel` 必須用 **`"small"`**（"medium" 在本機 CPU 會卡死）。
+  - 環境：`voiceover/setup-phrasing.sh` 一鍵建 `.venv-phrasing`（模板已附，含 requirements）。
+    **不要把 `.venv-phrasing` symlink 到別的系列資料夾**——那個系列一搬走就整條斷。
   - 流程：① `voiceover/.venv-phrasing/bin/python voiceover/verify_phrasing.py <該句純mp3> --fix`（逐句；報「斷錯 N 處」，N>0 時自動剪詞內靜音輸出 `{hash}_fixed.mp3`、原檔不動）→ ② `mv {hash}_fixed.mp3 {hash}.mp3` 覆蓋 → ③ 重跑 builder（re-probe 時長、重排 onset）→ ④ 再 verify 確認「斷錯 0」。
   - 若 fresh-take 也想試：先 `rm` 該 mp3 再跑 builder（hash 不含詞庫/取樣，同文字會重抽一個新 take），再 verify。
   - ⚠️ **含英文的句子**（如 Directed Acyclic Graph）whisper 對齊會亂、verify 結果不可信，別據此亂剪——靠耳朵。
+  - 🛑 **`verify_phrasing.py` 也會假陽性，它是「候選清單產生器」不是判官**（2026-07 ai-agent-eli5 EP01 定案）。
+    EP01 它報 3 處，**實測 3 處全錯**，照著 `--fix` 會剪掉兩個正常換氣＋一個塞音：
+    ① 它拿 **whisper 的轉錄文字**餵 jieba——whisper 把「迭代」聽成「疊帶」，jieba 就在錯字上切出
+    錯誤詞邊界，於是把逗號換氣誤判成詞內切；② 字級時間是詞級等分**內插**，有 ±1 字漂移；
+    ③ **<0.15s 的靜音多半是塞音閉鎖期不是停頓**（如「步 bù」），EP01 全集 402 個靜音段裡有 100 個是這種。
+    **修法：report 出來後一定要拿「原始腳本文字」交叉比對切點附近有沒有標點**，有標點就是換氣、放行。
+    另可加一道完全不靠 whisper 的稽核（clip 內靜音段數 vs 原文標點數），這招對含英文的句子一樣有效，
+    正好補上 verify_phrasing 判不了的那塊。
 - **改讀音不會自動重配**：build_storyteller 的 cache hash 只含文字、**不含 tw_lexicon**，改詞庫後含該詞的句子不會重抽——要 `rm` 該 mp3 強制重配。且 MiniMax **不一定吃** `詞/(pin1)(yin1)` 詞庫格式（EP6「移植」設 yi2 仍唸 yi4）；頑固者改測別的格式或**直接換詞**，並用 clip 給使用者耳朵確認。
 
 ## 動畫（vid-animator）— Remotion
