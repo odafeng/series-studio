@@ -3,6 +3,16 @@
 > 各 vid-* agent 與 produce-episode 流程都引用本檔。在「系列資料夾」根目錄操作（cwd = 系列根）。
 > 系列專屬參數一律從 `./series.yaml` 讀；口吻從 `./voice-style.md`；上下集 context 從 `./series-context.md`。
 
+## 集長換算（實測，別再用猜的）
+**MiniMax 克隆聲 @ speed 1.15 ＝ 5.97 字/秒**（EP01 實測：2525 字 / 422.9 秒）。
+換算成 speed 1.0 的基準 ≈ **5.19 字/秒**，這是 `build_script_editor.py` 的 `BASE_CPS`。
+- 目標字數 = `target_min` × 60 × 5.97
+- ⚠️ EP01 一開始用猜的 3.7 字/秒（＝11 分鐘要 2400 字），**誤差 61%**，導致編劇照著錯的上限
+  把稿子從 3301 字砍到 2500，砍掉的都是真材料。錯誤的常數不會報錯，只會讓所有下游決策偏一點。
+- **各集目標長度不該一律相同**：引言/後記的素材量可能只有大章的 1/7，硬套同一個長度就是灌水。
+  在 `series.yaml` 的 `episode_map` 逐集設 `target_min`。
+- `build_recording_script.py` 的 4.3 字/秒是**真人唸稿**語速，跟 TTS 是兩回事，不要混用。
+
 ## 腳本格式（編劇）
 - 檔案 `episodes/epNN/script/epNN-script.md`。
 - `**【旁白】**` 後一段＝要唸的（本人口吻）；`**【畫面】**/**【字幕】**＝動畫指示（不唸）；`## NN 場景名` 分場景。
@@ -31,29 +41,26 @@
 - 斷句怪／詞被切開 → **改寫腳本**（非詞庫）。
 - **🚪 斷句 QC（render 前必做，每集沿用；2026-06 EP6 定案）**：MiniMax 常把詞中插微停頓（治療→「治｜療」、約定→「約｜定」）。判官**一律用 `voiceover/verify_phrasing.py`**（ffmpeg 物理偵測真實靜音＋whisper 只定位→jieba 判詞內），**不要信 `phrasing_gate.py`**——後者用 whisper 內插字級時間、±1 字漂移、**大量把標點旁停頓誤報成詞內切（假陽性）**，照它修會狂修假陽性又漏真缺陷。
   - ⚠️ `verify_phrasing.py` 內 `WhisperModel` 必須用 **`"small"`**（"medium" 在本機 CPU 會卡死）。
-  - 環境：`voiceover/setup-phrasing.sh` 一鍵建 `.venv-phrasing`（模板已附，含 requirements）。
-    **不要把 `.venv-phrasing` symlink 到別的系列資料夾**——那個系列一搬走就整條斷。
   - 流程：① `voiceover/.venv-phrasing/bin/python voiceover/verify_phrasing.py <該句純mp3> --fix`（逐句；報「斷錯 N 處」，N>0 時自動剪詞內靜音輸出 `{hash}_fixed.mp3`、原檔不動）→ ② `mv {hash}_fixed.mp3 {hash}.mp3` 覆蓋 → ③ 重跑 builder（re-probe 時長、重排 onset）→ ④ 再 verify 確認「斷錯 0」。
   - 若 fresh-take 也想試：先 `rm` 該 mp3 再跑 builder（hash 不含詞庫/取樣，同文字會重抽一個新 take），再 verify。
   - ⚠️ **含英文的句子**（如 Directed Acyclic Graph）whisper 對齊會亂、verify 結果不可信，別據此亂剪——靠耳朵。
-  - 🛑 **`verify_phrasing.py` 也會假陽性，它是「候選清單產生器」不是判官**（2026-07 ai-agent-eli5 EP01 定案）。
-    EP01 它報 3 處，**實測 3 處全錯**，照著 `--fix` 會剪掉兩個正常換氣＋一個塞音：
-    ① 它拿 **whisper 的轉錄文字**餵 jieba——whisper 把「迭代」聽成「疊帶」，jieba 就在錯字上切出
-    錯誤詞邊界，於是把逗號換氣誤判成詞內切；② 字級時間是詞級等分**內插**，有 ±1 字漂移；
-    ③ **<0.15s 的靜音多半是塞音閉鎖期不是停頓**（如「步 bù」），EP01 全集 402 個靜音段裡有 100 個是這種。
-    **修法：report 出來後一定要拿「原始腳本文字」交叉比對切點附近有沒有標點**，有標點就是換氣、放行。
-    另可加一道完全不靠 whisper 的稽核（clip 內靜音段數 vs 原文標點數），這招對含英文的句子一樣有效，
-    正好補上 verify_phrasing 判不了的那塊。
 - **改讀音不會自動重配**：build_storyteller 的 cache hash 只含文字、**不含 tw_lexicon**，改詞庫後含該詞的句子不會重抽——要 `rm` 該 mp3 強制重配。且 MiniMax **不一定吃** `詞/(pin1)(yin1)` 詞庫格式（EP6「移植」設 yi2 仍唸 yi4）；頑固者改測別的格式或**直接換詞**，並用 clip 給使用者耳朵確認。
 
 ## 動畫（vid-animator）— Remotion
 - 元件：`remotion/src/components.tsx`(Reveal/SceneTitle/Chip/Card)、`theme.ts`、`fonts.ts`(codeFamily)。每集寫 `scenesNN.tsx` + `EpisodeNN.tsx`（從 manifest `epNNData.ts` 的 EP NN 自動排場景）+ 註冊 `Root.tsx`。
 - 共用 `Narration`/`Subtitles`（吃 `cues` prop）。
-- **字幕 cues 必用真實語音時間戳（自動校正斷句）**：配音定稿後跑 `python3 tools/build_subtitle_cues.py --ep N`（whisper 每段 wav → srt → `voiceover/cues/epNN_cues.json`，`fromF/toF`＝真實語音時間、依語音停頓自然斷句）。字幕進出時間**一律取自此 cues，嚴禁用字數比例估算**（會「聲音比字幕快／字幕飄」）。cues 的 `text` 是 whisper 轉錄（base 有同音/技術詞錯），技術詞/人名對照 `script.md`【旁白】校正後再上字幕。有 `_short` 剪輯版的場景自動採用其 srt。
+- **字幕 cues 必用真實語音時間戳**：配音定稿後跑 `python3 tools/build_subtitle_cues.py --ep N`，
+  它會**同時**產 `voiceover/cues/epNN_cues.json`（來源）與 `remotion/src/epNNCues.ts`（Remotion 吃的）。
+  ⚠️ 這兩份以前是手工轉的，EP01 重配音後 json 更新了、ts 沒跟上，**差點讓整集字幕跑在舊講稿的時間軸上**——
+  沒有任何檢查會發現。現在一步到位，不要手改 ts。
+- （舊版說明）`build_subtitle_cues.py --ep N`（whisper 每段 wav → srt → `voiceover/cues/epNN_cues.json`，`fromF/toF`＝真實語音時間、依語音停頓自然斷句）。字幕進出時間**一律取自此 cues，嚴禁用字數比例估算**（會「聲音比字幕快／字幕飄」）。cues 的 `text` 是 whisper 轉錄（base 有同音/技術詞錯），技術詞/人名對照 `script.md`【旁白】校正後再上字幕。有 `_short` 剪輯版的場景自動採用其 srt。
 - **實機 demo（終端類）預設用合成 asciicast 鏈**（2026-06 EP6 起）：`generate_*_cast.py` 手工合成 asciicast v2（模仿 Claude Code TUI）→ `agg`（字體必含 Heiti TC）→ ffmpeg mp4。**鐵則：數字必須由實機真跑回填、絕不捏造**；畫面可合成。可重跑、無輸入法/睡眠/權限雷。工具鏈範例：colon-and-code `tools/capture/`（含 README、安全護欄：中性 prompt、不露 email/hostname）。
 - **真錄螢幕**（GUI/需要真螢幕的橋段，macOS）：⚠️先把輸入法切 ABC（`osascript ... key code 49 using control`）否則 keystroke 全形；用 `/opt/anaconda3/bin/python3`；`ffmpeg -f avfoundation -i "2"` 錄螢幕（需 Terminal 螢幕錄製權限）→ 裁終端機放大 + `tpad` 凍結補長 → `OffthreadVideo` 嵌入（明確尺寸、別蓋標題）。
 - **渲染＝逐場景輸出 + concat（標準流程，所有影片 agent 一律照做）**：本體**不要**整集一次渲染（改一個字得重跑數萬幀）。每個場景渲成獨立 mp4（`render/scenes/sNN.mp4`，全部用**相同編碼參數**：libx264 / yuv420p / 同 fps / 同解析度 / 同音訊參數），本體＝`ffmpeg -f concat -c copy` 拼接這些場景 mp4（拼接僅數秒）。
   - **迭代只重渲改到的場景**：作者挑出「sceneNN 哪裡不對」→ 只重渲那一支 `sNN.mp4`（分鐘級）→ 重 concat（秒級）。嚴禁為了一個小改動重渲整片。
+  - **⚠️ 逐場景渲染要配逐場景 commit。** 只做前者等於只做一半：產物(mp4)一直在變、來源(tsx)卻沒有任何快照，
+    美術指導拿到不一致的兩者時只能回報「這是共用元件庫，我無法判斷剛才改了什麼」——EP01 因此白跑一輪 QC。
+    每支場景渲完就 `git add` 該場景相關的檔案並 commit，讓 QC 能指著 diff 說「就是這行」。
   - 單場景渲染：獨立 composition，或 `npx remotion render src/index.ts EpNN render/scenes/sNN.mp4 --frames=<startF>-<endF>`。
   - **驗證優先用 Remotion Studio 即時預覽**（`npx remotion studio`，拖播放頭到該秒、0 等待），不要為了「看一眼對不對」就渲染；要產檔再渲。審查階段可 `--scale=0.5` 快渲、最後才全解析度跑一次。
   - 仍先 `still` 抽幀驗關鍵時刻。場景之間切點要乾淨（無跨場景動畫），concat 才不破。
@@ -69,10 +76,46 @@
 - MiniMax `music-2.6` + `is_instrumental:true`。接長 `ffmpeg -stream_loop -1 -t <秒>`。
 
 ## 組裝（確定性）
+
+**🚪 組裝前必跑 `python3 tools/check_staleness.py --ep N`（exit 1 就不要組）。**
+組裝完再跑一次 `--assembled` 驗收。EP01 踩了三次同一個坑：mp4 看起來新、幀數也對，
+但它比 `scenes01.tsx` 舊，或比其他場景舊（另一個 agent 在你組裝後又重渲了兩支），
+**成片默默混著兩個版本、不會報錯**。兩次把過期成片交給作者看，都是這樣來的。
+- 該工具用檔案級 mtime，`scenes01.tsx` 一改會讓 8 個場景全部看起來過期（假陽性）。
+  它是保守的擋門員，不是重渲範圍的精算器。要精算得看 `git diff -U0` 的行號落在哪個 `Scene` 範圍——
+  **前提是每個場景改完就 commit**，否則中間版本無跡可循，只能全部重渲。
+
 三段 concat：前言(乾聲) + 片頭(intro.mp4 或渲染的 Intro) + 本體(輕 BGM ducking)。
+- **片頭長度取視訊串流的幀數，不要取容器 duration**：容器可能因尾巴掛靜音音軌而較長
+  （EP01 是 4.500s 畫面 vs 4.544s 容器）。信容器會讓整條字幕系統性偏 44ms。
+  組裝時取 `intro.mp4` 的**視訊軌**配 `intro_bgm.mp3`，那條靜音軌本來就用不到。
+- 三段拼完量一次各段 LUFS，確認沒有 3 dB 台階（mono→stereo 升混路徑不同會產生）。
 - 本體 ducking：`[0:a]asplit=2[nar][key];[1:a]volume={body_volume}[bg];[bg][key]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400[bgd];[nar][bgd]amix=inputs=2:normalize=0:duration=first[a]`
 - 三段同 codec/fps/音訊參數，concat demuxer `-c copy`。
 - **配合逐場景輸出**：前言＝`scenes/s00.mp4` 直接用（乾聲）、本體＝`concat(s01..sNN)` 再混 BGM ducking，不必再從整片切「前言/本體分界 startF」（分界天然落在場景檔邊界）。改某場景只重渲該 `sNN.mp4`→重 concat 本體→重混 BGM→三段重組，整片只在交付前需要時跑。
+
+## 多 agent 並行（EP01 定案，代價很貴的一課）
+
+同一個系列資料夾常有多條線同時在寫（編劇/動畫/美術/BGM，甚至多個 Claude session）。三條鐵則：
+
+1. **只 `git add` 自己動過的路徑，絕不 `git add -A`。** 後者會把別人正在做、還沒 commit 的在製品
+   一起掃進你的 commit，訊息與內容對不上。EP01 有個「只寫了 BGM」的 commit 實際包含 18 個檔案。
+2. **「沒有動作」不等於「已經死亡」。** 用檔案時間戳判斷 agent 存活會誤判——它可能正在跑長渲染。
+   要接手別人的工作範圍前**先發訊息問它**。EP01 誤判一個停了 1 小時 45 分的動畫師已死、派了第二個，
+   結果兩條線改同一批檔案、互相覆蓋渲染產物，還製造出「mp4 與原始碼不同調」這種本來不存在的問題。
+3. **審查者不要改被審者的原始碼。** 美術指導直接改 `scenes01.tsx` 並重渲覆蓋動畫師的產出，
+   它自己報告裡的「不同調」正是這個動作造成的。**退件要具體到檔案與行號，修改由原作者做。**
+
+## 改腳本的連鎖代價（配音後才改，成本差一個量級）
+
+腳本一改，下游全部失效，而且**沒有任何機制會自動告訴你**：
+
+    腳本 → 配音(API 費用) → cues(whisper 對齊) → SCENES01 切點 → 場景重新對時(人工判斷) → 8 支重渲(20 分) → 重組
+
+- **`SCENES01` 的切點必須依 manifest 重算**（每個場景 from = 該場景第一句的 `startF`），不是寫死的常數。
+- **場景長度會變** → `scenes01.tsx` 裡每個 `at={}` 都是對著舊旁白節奏寫的，必須逐一重新錨定到新的 cue onset。
+  EP01 改一輪後 s03 多 4.5 秒、s02 少 3.3 秒，不重新對時的話畫面會在旁白講完後才動。
+- 所以**腳本關要卡在配音之前**，那是唯一改動成本趨近於零的時刻。
 
 ## 上架（vid-seo + 發布）
 - metadata：標題(關鍵字前置≤100)、描述(hook→摘要→章節→出處連結→授權)、tags、章節(本體時間=原始+片頭長度)、縮圖、置頂留言。
