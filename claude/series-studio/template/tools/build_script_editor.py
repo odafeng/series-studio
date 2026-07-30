@@ -100,38 +100,30 @@ def parse_script(md):
             continue
         if cur is not None:
             # 一個場景可以有多組「畫面→旁白」交錯（既有系列慣例）。
-            # 每收完一段旁白就算一組結束，下一個【畫面】/【字幕】開新的一組。
-            if line.startswith("**【畫面】**"):
+            # 每收完一段旁白就算一組結束，下一個標記開新的一組。
+            m = re.match(r'\*\*【(畫面|字幕|旁白)】\*\*', line)
+            if m:
+                key = {"畫面": "screen", "字幕": "subtitle", "旁白": "narration"}[m.group(1)]
                 if blk is None or blk["narration"]:
                     close_block()
                     blk = new_block()
-                blk["screen"] = re.sub(r'^\*\*【畫面】\*\*\s*', '', line).strip()
+                # 三種標記都可能跨行：【畫面】常是「同行開頭 + 續行」（例如片尾
+                # 兩列授權 credit），【旁白】則多是標記獨佔一行、內容全在續行。
+                # ⚠️ 只取首行會靜悄悄吃掉續行——那裡放的是 Apache-2.0 要求的署名。
+                first = re.sub(r'^\*\*【..】\*\*\s*', '', line).rstrip()
                 i += 1
-                continue
-            if line.startswith("**【字幕】**"):
-                if blk is None or blk["narration"]:
-                    close_block()
-                    blk = new_block()
-                blk["subtitle"] = re.sub(r'^\*\*【字幕】\*\*\s*', '', line).strip()
-                i += 1
-                continue
-            if line.startswith("**【旁白】**"):
-                if blk is None:
-                    blk = new_block()
-                i += 1
-                narr = []
+                rest = []
                 while i < n:
                     l2 = lines[i]
                     s2 = l2.strip()
-                    # ⚠️ 必須在下一個【畫面】/【字幕】/【旁白】就停，
-                    # 否則旁白會把整個場景剩下的動畫指示全吞進去。
+                    # 必須在下一個標記就停，否則會把後面的內容一起吞掉。
                     if (s2 == "---" or l2.startswith("## ")
                             or l2.startswith("**【")
                             or (s2.startswith("〔") and s2.endswith("〕"))):
                         break
-                    narr.append(l2)
+                    rest.append(l2)
                     i += 1
-                blk["narration"] = "\n".join(narr).strip()
+                blk[key] = "\n".join(([first] if first else []) + rest).strip()
                 continue
         i += 1
     flush()
@@ -302,10 +294,87 @@ def build_html(data, colors, title, epkey, dlname):
     return html
 
 
+def build_md(data):
+    """買 buildMd() 的 Python 分身，只給 selftest 用（正式匯出走瀏覽器那份 JS）。
+    兩邊邏輯必須一致；改 JS 的 buildMd 時記得同步這裡，selftest 會抓到不一致。"""
+    out = []
+    for item in data:
+        if item["type"] == "head":
+            out.append(item["text"] + "\n\n---")
+        elif item["type"] == "marker":
+            out.append("\n" + item["text"] + "\n\n---")
+        elif item["type"] == "license":
+            out.append("\n" + item["text"])
+        else:
+            s = "\n" + item["title"] + "\n"
+            for b in item["blocks"]:
+                if b["screen"]:
+                    s += "\n**【畫面】** " + b["screen"] + "\n"
+                if b["subtitle"]:
+                    s += "\n**【字幕】** " + b["subtitle"] + "\n"
+                if b["narration"]:
+                    s += "\n**【旁白】**\n" + b["narration"] + "\n"
+            s += "\n---"
+            out.append(s)
+    return "\n".join(out)
+
+
+SELFTEST_MD = """# EP99 — 測試
+
+---
+
+## 01 多組交錯
+
+**【畫面】** 第一個畫面。
+
+**【旁白】**
+第一段旁白。
+
+**【畫面】** 第二個畫面，這行後面還有續行：
+`續行一：這是 Apache-2.0 要求的署名`
+`續行二：不能被吃掉`
+
+**【字幕】** 一行字幕
+
+**【旁白】**
+第二段旁白。
+
+---
+"""
+
+
+def selftest():
+    """跨行【畫面】曾經被靜悄悄吃掉，吃的還是授權署名。這裡守住。"""
+    data = parse_script(SELFTEST_MD)
+    scenes = [d for d in data if d["type"] == "scene"]
+    assert len(scenes) == 1, f"預期 1 個場景，實得 {len(scenes)}"
+    blocks = scenes[0]["blocks"]
+    assert len(blocks) == 2, f"預期 2 組 block，實得 {len(blocks)}"
+
+    # 續行必須完整保留
+    assert "續行一" in blocks[1]["screen"], "跨行【畫面】的續行被吃掉了"
+    assert "續行二" in blocks[1]["screen"], "跨行【畫面】的續行被吃掉了"
+    # 旁白不得混入動畫指示
+    for b in blocks:
+        assert "【畫面】" not in b["narration"], "旁白吞進了畫面指示"
+    assert blocks[0]["narration"] == "第一段旁白。"
+    assert blocks[1]["subtitle"] == "一行字幕"
+
+    # round-trip：重建後再解析必須完全一致
+    assert parse_script(build_md(data)) == data, "parse → 匯出 → parse 不穩定"
+    print("✓ selftest 通過：跨行【畫面】保住、旁白不混指示、round-trip 穩定")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ep", type=int, required=True, help="集數 N")
+    ap.add_argument("--ep", type=int, help="集數 N")
+    ap.add_argument("--selftest", action="store_true", help="跑內建測試")
     args = ap.parse_args()
+    if args.selftest:
+        return selftest()
+    if args.ep is None:
+        ap.error("要嘛給 --ep N，要嘛給 --selftest")
     epnn = f"{args.ep:02d}"
     md_path = Path(f"episodes/ep{epnn}/script/ep{epnn}-script.md")
     if not md_path.exists():
