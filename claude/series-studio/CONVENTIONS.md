@@ -10,6 +10,12 @@
 - demo 段用素材附帶的程式碼實機演示，**務必留旁白蓋住 demo 播放**。
 - 取素材：`source.kind: local` → 讀 `source/epN.md`；`github` → 用 `api.github.com/repos/{repo}/contents/{path}?ref={ref}` 取 base64 解碼（raw.githubusercontent 常逾時）。
 
+## 腳本 lint（編劇交稿後、開編輯器前必跑）— `python3 tools/lint_script.py --ep N`
+- 掃【旁白】：破音字（表格真相在 `voice-style.md`，工具直接解析）、破折號、實作召喚、出題、導讀腔＝**ERROR**；長串無標點（>28 字）、小數點＝warn。exit 1 表示有 ERROR，退回編劇改。
+- 順便產**耳朵確認清單**（旁白裡所有英文詞／人名）給配音師——含英文的句子 `verify_phrasing.py` 對齊會亂、結果不可信，只能靠聽。
+- 這些雷要死在編劇桌上：`pronunciation_dict` 常常無效還會弄壞同句斷句（EP6 定案），事後修比事前避開貴得多。
+- 改規則＝改 `voice-style.md` 那張表，不要改工具。`--selftest` 可驗規則沒被改壞。
+
 ## 腳本關（🚪 給使用者過目／編輯）— `python3 tools/build_script_editor.py --ep N`
 - 把 `epNN-script.md` 轉成**可編輯的腳本編輯器 HTML**（`epNN-script-editor.html`），open 給使用者。**腳本關一律用這個可編輯模式**，不要只給唯讀 HTML。
 - 使用者可逐段改旁白、在任意位置插入自己的段落、刪段、即時看字數/時長，一鍵「匯出 Markdown」成 `epNN-script-edited.md`；自動存 localStorage、可還原原稿、可複製全部旁白。
