@@ -64,20 +64,32 @@ def parse_script(md):
         i += 1
 
     cur = None
+    blk = None
+
+    def new_block():
+        return {"screen": "", "subtitle": "", "narration": ""}
+
+    def close_block():
+        """把當前 block 收進場景（空 block 不收）。"""
+        nonlocal blk
+        if cur is not None and blk and (blk["screen"] or blk["subtitle"] or blk["narration"]):
+            cur["blocks"].append(blk)
+        blk = None
 
     def flush():
-        nonlocal cur
+        nonlocal cur, blk
         if cur:
+            close_block()
             data.append(cur)
             cur = None
+        blk = None
 
     while i < n:
         line = lines[i]
         s = line.strip()
         if line.startswith("## "):
             flush()
-            cur = {"type": "scene", "title": line.rstrip(),
-                   "screen": "", "subtitle": "", "narration": ""}
+            cur = {"type": "scene", "title": line.rstrip(), "blocks": []}
             i += 1
             continue
         if s.startswith("〔") and s.endswith("〕"):
@@ -87,26 +99,39 @@ def parse_script(md):
             i += 1
             continue
         if cur is not None:
+            # 一個場景可以有多組「畫面→旁白」交錯（既有系列慣例）。
+            # 每收完一段旁白就算一組結束，下一個【畫面】/【字幕】開新的一組。
             if line.startswith("**【畫面】**"):
-                cur["screen"] = re.sub(r'^\*\*【畫面】\*\*\s*', '', line).strip()
+                if blk is None or blk["narration"]:
+                    close_block()
+                    blk = new_block()
+                blk["screen"] = re.sub(r'^\*\*【畫面】\*\*\s*', '', line).strip()
                 i += 1
                 continue
             if line.startswith("**【字幕】**"):
-                cur["subtitle"] = re.sub(r'^\*\*【字幕】\*\*\s*', '', line).strip()
+                if blk is None or blk["narration"]:
+                    close_block()
+                    blk = new_block()
+                blk["subtitle"] = re.sub(r'^\*\*【字幕】\*\*\s*', '', line).strip()
                 i += 1
                 continue
             if line.startswith("**【旁白】**"):
+                if blk is None:
+                    blk = new_block()
                 i += 1
                 narr = []
                 while i < n:
                     l2 = lines[i]
                     s2 = l2.strip()
+                    # ⚠️ 必須在下一個【畫面】/【字幕】/【旁白】就停，
+                    # 否則旁白會把整個場景剩下的動畫指示全吞進去。
                     if (s2 == "---" or l2.startswith("## ")
+                            or l2.startswith("**【")
                             or (s2.startswith("〔") and s2.endswith("〕"))):
                         break
                     narr.append(l2)
                     i += 1
-                cur["narration"] = "\n".join(narr).strip()
+                blk["narration"] = "\n".join(narr).strip()
                 continue
         i += 1
     flush()
@@ -191,6 +216,7 @@ function save(){ localStorage.setItem(KEY, JSON.stringify(data));
   const s=document.getElementById('saved'); s.classList.add('show');
   clearTimeout(window._st); window._st=setTimeout(()=>s.classList.remove('show'),1200); }
 function wc(t){ return (t||"").replace(/\s/g,"").length; }
+function sceneWc(item){ return (item.blocks||[]).reduce((a,b)=>a+wc(b.narration),0); }
 function autosize(ta){ ta.style.height="auto"; ta.style.height=ta.scrollHeight+"px"; }
 function render(){
   const main=document.getElementById('main'); main.innerHTML="";
@@ -200,11 +226,17 @@ function render(){
     const card=document.createElement('div'); card.className="scene";
     const t=document.createElement('input'); t.className="scene-title"; t.value=item.title;
     t.oninput=()=>{item.title=t.value; save();}; card.appendChild(t);
-    card.appendChild(field("畫面（不唸）","aux","screen",item,idx));
-    card.appendChild(field("字幕（不唸）","aux","subtitle",item,idx));
-    card.appendChild(field("旁白（要唸）","narration","narration",item,idx,true));
+    const blocks=item.blocks||[]; const nb=blocks.length;
+    blocks.forEach((b,bi)=>{
+      if(nb>1){ const bl=document.createElement('div');
+        bl.style.cssText="font:600 11px/1.6 ui-monospace,monospace;opacity:.42;margin:16px 0 2px;letter-spacing:.08em";
+        bl.textContent="── 段 "+(bi+1)+" / "+nb; card.appendChild(bl); }
+      card.appendChild(field("畫面（不唸）","aux","screen",b,idx));
+      card.appendChild(field("字幕（不唸）","aux","subtitle",b,idx));
+      card.appendChild(field("旁白（要唸）","narration","narration",b,idx,true));
+    });
     const foot=document.createElement('div'); foot.className="scene-foot";
-    const w=document.createElement('span'); w.className="wc"; w.id="wc"+idx; w.innerHTML="旁白 <b>"+wc(item.narration)+"</b> 字";
+    const w=document.createElement('span'); w.className="wc"; w.id="wc"+idx; w.innerHTML="旁白 <b>"+sceneWc(item)+"</b> 字";
     const ra=document.createElement('div'); ra.className="row-actions";
     const del=document.createElement('button'); del.className="mini"; del.textContent="刪除此段";
     del.onclick=()=>{ if(confirm("確定刪除「"+item.title+"」？")){ data.splice(idx,1); save(); render(); } };
@@ -213,20 +245,20 @@ function render(){
   });
   updateTotals();
 }
-function field(label,cls,key,item,idx,isNarration){
+function field(label,cls,key,obj,idx,isNarration){
   const f=document.createElement('div'); f.className="field";
   const l=document.createElement('div'); l.className="label"; l.innerHTML=label+(isNarration?' <span class="pill">會唸出來</span>':'');
-  const ta=document.createElement('textarea'); ta.className=cls; ta.value=item[key]||"";
-  ta.oninput=()=>{ item[key]=ta.value; autosize(ta); if(isNarration){ document.getElementById('wc'+idx).innerHTML="旁白 <b>"+wc(ta.value)+"</b> 字"; updateTotals(); } save(); };
+  const ta=document.createElement('textarea'); ta.className=cls; ta.value=obj[key]||"";
+  ta.oninput=()=>{ obj[key]=ta.value; autosize(ta); if(isNarration){ document.getElementById('wc'+idx).innerHTML="旁白 <b>"+sceneWc(data[idx])+"</b> 字"; updateTotals(); } save(); };
   f.appendChild(l); f.appendChild(ta); requestAnimationFrame(()=>autosize(ta)); return f;
 }
 function addInsertBar(main,idx){
   const bar=document.createElement('div'); bar.className="insert-bar";
   const b=document.createElement('button'); b.textContent="＋ 在這裡插入我自己的段落";
-  b.onclick=()=>{ data.splice(idx+1,0,{type:"scene",title:"## 新段落（我自己加的）",screen:"",subtitle:"",narration:"在這裡輸入你想講的話……"}); save(); render(); };
+  b.onclick=()=>{ data.splice(idx+1,0,{type:"scene",title:"## 新段落（我自己加的）",blocks:[{screen:"",subtitle:"",narration:"在這裡輸入你想講的話……"}]}); save(); render(); };
   bar.appendChild(b); main.appendChild(bar);
 }
-function updateTotals(){ let tot=0; data.forEach(i=>{ if(i.type==="scene") tot+=wc(i.narration); });
+function updateTotals(){ let tot=0; data.forEach(i=>{ if(i.type==="scene") tot+=sceneWc(i); });
   document.getElementById('totalWords').textContent=tot;
   document.getElementById('totalTime').textContent=(tot/(4.3*60)).toFixed(1); }
 function buildMd(){ let out=[];
@@ -235,14 +267,17 @@ function buildMd(){ let out=[];
     else if(item.type==="marker"){ out.push("\n"+item.text+"\n\n---"); }
     else if(item.type==="license"){ out.push("\n"+item.text); }
     else{ let s="\n"+item.title+"\n";
-      if(item.screen) s+="\n**【畫面】** "+item.screen+"\n";
-      if(item.subtitle) s+="\n**【字幕】** "+item.subtitle+"\n";
-      s+="\n**【旁白】**\n"+item.narration+"\n\n---"; out.push(s); }
+      (item.blocks||[]).forEach(b=>{
+        if(b.screen) s+="\n**【畫面】** "+b.screen+"\n";
+        if(b.subtitle) s+="\n**【字幕】** "+b.subtitle+"\n";
+        if(b.narration) s+="\n**【旁白】**\n"+b.narration+"\n";
+      });
+      s+="\n---"; out.push(s); }
   });
   return out.join("\n"); }
 function downloadMd(){ const blob=new Blob([buildMd()],{type:"text/markdown;charset=utf-8"});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download="__DLNAME__"; a.click(); }
-function copyNarration(){ const t=data.filter(i=>i.type==="scene").map(i=>i.title+"\n"+i.narration).join("\n\n");
+function copyNarration(){ const t=data.filter(i=>i.type==="scene").map(i=>i.title+"\n"+(i.blocks||[]).map(b=>b.narration).filter(Boolean).join("\n")).join("\n\n");
   navigator.clipboard.writeText(t).then(()=>alert("已複製全部旁白到剪貼簿")); }
 function resetAll(){ if(confirm("還原成原始稿？你目前的修改會被清掉。")){ data=JSON.parse(JSON.stringify(ORIGINAL)); save(); render(); } }
 render();
@@ -293,7 +328,9 @@ def main():
     out = md_path.parent / f"ep{epnn}-script-editor.html"
     out.write_text(build_html(data, colors, title, epkey, dlname), encoding="utf-8")
     scenes = sum(1 for it in data if it["type"] == "scene")
-    words = sum(len(re.sub(r'\s', '', it.get("narration", ""))) for it in data if it["type"] == "scene")
+    words = sum(len(re.sub(r'\s', '', b.get("narration", "")))
+                for it in data if it["type"] == "scene"
+                for b in it.get("blocks", []))
     print(f"✓ 已生成 {out}")
     print(f"  場景數：{scenes}｜旁白約 {words} 字｜約 {words / (4.3 * 60):.1f} 分")
 
