@@ -44,7 +44,13 @@
   - 流程：① `voiceover/.venv-phrasing/bin/python voiceover/verify_phrasing.py <該句純mp3> --fix`（逐句；報「斷錯 N 處」，N>0 時自動剪詞內靜音輸出 `{hash}_fixed.mp3`、原檔不動）→ ② `mv {hash}_fixed.mp3 {hash}.mp3` 覆蓋 → ③ 重跑 builder（re-probe 時長、重排 onset）→ ④ 再 verify 確認「斷錯 0」。
   - 若 fresh-take 也想試：先 `rm` 該 mp3 再跑 builder（hash 不含詞庫/取樣，同文字會重抽一個新 take），再 verify。
   - ⚠️ **含英文的句子**（如 Directed Acyclic Graph）whisper 對齊會亂、verify 結果不可信，別據此亂剪——靠耳朵。
-- **改讀音不會自動重配**：build_storyteller 的 cache hash 只含文字、**不含 tw_lexicon**，改詞庫後含該詞的句子不會重抽——要 `rm` 該 mp3 強制重配。且 MiniMax **不一定吃** `詞/(pin1)(yin1)` 詞庫格式（EP6「移植」設 yi2 仍唸 yi4）；頑固者改測別的格式或**直接換詞**，並用 clip 給使用者耳朵確認。
+- **改讀音會不會自動重配，取決於你用哪支合成器——先去讀那支的 hash 怎麼算，不要照抄本條**：
+  - `build_storyteller.py`：hash **只含文字**，改詞庫後含該詞的句子**不會**重抽 → 要 `rm` 該 mp3 強制重配。
+  - `build_voice.py`（ai-agent-eli5 等）：hash **含 `lex_entries(text)`** → 改詞庫**會自動**重抽該句，不必手動 `rm`。
+  EP02 一開始照本條的舊敘述以為要手動 `rm`，讀了原始碼才發現這支不用。**文件會跟程式碼脫節，hash 的定義在程式碼裡。**
+- 且 MiniMax **不一定吃** `詞/(pin1)(yin1)` 詞庫格式（EP6「移植」設 yi2 仍唸 yi4）；頑固者改測別的格式或**直接換詞**，並用 clip 給使用者耳朵確認。
+  ✅ 也有成功案例：EP02「彈性」加 `(tan2)(xing4)` 一次就修好（原本唸 dàn），且沒弄壞同句斷句。
+  **判斷準則不是「詞庫沒用」，而是「讀音錯用詞庫、斷句錯用重抽」**——兩種缺陷的修法不同，別混用。
 
 ## 動畫（vid-animator）— Remotion
 - 元件：`remotion/src/components.tsx`(Reveal/SceneTitle/Chip/Card)、`theme.ts`、`fonts.ts`(codeFamily)。每集寫 `scenesNN.tsx` + `EpisodeNN.tsx`（從 manifest `epNNData.ts` 的 EP NN 自動排場景）+ 註冊 `Root.tsx`。
@@ -74,6 +80,22 @@
 
 ## BGM（vid-music）— `python3 tools/generate_bgm.py --preset intro|body`
 - MiniMax `music-2.6` + `is_instrumental:true`。接長 `ffmpeg -stream_loop -1 -t <秒>`。
+- **⚠️ `music-2.6` 有超過一半的機率無視 prompt 裡的 `no drums no percussion`（EP02 實測：7 支退 4 支）。**
+  沒有自動 QC 的話，鼓點會直接混進成片、沒有任何人會發現。判準：量高頻帶（>2kHz）起音的週期性自相關——
+  乾淨的床樂 r≈0.28，有鼓的 r=0.71~0.85（約 100 BPM）。另外量「低於自身中位數 10 dB」的時間占比，
+  >20% 代表它給的是「靜音中的零星音符」而不是床樂，一樣退。**每支新素材都要過這兩關才留用。**
+- **⚠️ 集長超過 ~12 分鐘就不要用 `-stream_loop` 接長單一樂段。**
+  循環可偵測度會隨圈數暴增，而且會露出諧波階梯——那是「同一段一直繞」的數學指紋，觀眾說不出哪裡怪但會疲勞。
+  EP02 實測（100 秒樂段）：循環 4 次 r=0.743、只露 2 階；循環 16 次 r=0.938、露 5 階以上且階階都強。
+  正解：**產 3–4 段不同素材，切成長度不一的片段（各 48–82s）交錯排列，6 秒等功率交叉淡接**，
+  每個素材出現次數相近但**間隔不固定**（耳朵抓不到預期點）。EP02 這樣做完 r=0.189、無諧波階梯。
+  最後套一道 20 秒尺度的緩慢增益修正，讓接縫不留 dB 台階。
+  ⚠️ 保留一段前集用過的素材（EP02 留了 EP01 那支）可以維持系列聽感連續性。
+- **試聽片段要抓「最差的接縫」，不是隨便一段**：把所有交叉淡接依「頻譜差 + 電平落差」排名，
+  取最差那處前後各 15 秒給作者聽。聽不出來就等於整條都穩——而且試聽是原始音量，
+  實際上片還要再吃 `body_volume` 0.15 + sidechain ducking（約再壓 16 dB）。
+- **BGM 長度＝本體長度，不含乾聲前言**。別拿 manifest 的 `total`（含前言）去算。
+  EP01 佐證：出貨的 `bgm_body_403.mp3` = 403.008s = `body_nobgm.mp4`，而 total 是 427.63s。
 
 ## 組裝（確定性）
 
@@ -105,6 +127,11 @@
    結果兩條線改同一批檔案、互相覆蓋渲染產物，還製造出「mp4 與原始碼不同調」這種本來不存在的問題。
 3. **審查者不要改被審者的原始碼。** 美術指導直接改 `scenes01.tsx` 並重渲覆蓋動畫師的產出，
    它自己報告裡的「不同調」正是這個動作造成的。**退件要具體到檔案與行號，修改由原作者做。**
+4. **審查結論一定要落地成檔案，不能只存在 agent 的 context 裡。**
+   EP02 的動畫師渲完 15 支場景、自審找出 4 個 must-fix，還沒套用就撞到 API 用量上限被中斷，
+   **transcript 沒留下來，那份清單直接消失**——產物在磁碟上、commit 在 git 裡，但「我知道哪裡有問題」
+   是整條 pipeline 最脆弱的資產。凡是「已發現但未修復」的清單，一律當場寫成
+   `episodes/epNN/render/art-review.md` 這類檔案。重跑一次審查比回憶便宜，但前提是你知道要重跑。
 
 ## 改腳本的連鎖代價（配音後才改，成本差一個量級）
 
