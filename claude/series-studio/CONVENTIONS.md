@@ -51,9 +51,27 @@
 - 且 MiniMax **不一定吃** `詞/(pin1)(yin1)` 詞庫格式（EP6「移植」設 yi2 仍唸 yi4）；頑固者改測別的格式或**直接換詞**，並用 clip 給使用者耳朵確認。
   ✅ 也有成功案例：EP02「彈性」加 `(tan2)(xing4)` 一次就修好（原本唸 dàn），且沒弄壞同句斷句。
   **判斷準則不是「詞庫沒用」，而是「讀音錯用詞庫、斷句錯用重抽」**——兩種缺陷的修法不同，別混用。
+- **⚠️ 加詞庫不是零成本：它會改變句子長度，進而動到整條下游時間軸。**
+  EP02 替「執行」加 dict 後，那 13 句普遍變慢，其中一句多了 **1.2 秒**、重抽 10 次都回不去
+  （dict 干擾的是整句節奏，不只那個詞）。而 `scenesNN.tsx` 的 `at={}` 與 `EpisodeNN.tsx` 的
+  `SCENES` 切點**都是寫死的常數**，句長一變，後面所有動畫就相對旁白飄掉。
+  **正解：重抽後把 mp3 正規化回原本的精確秒數**，`startF`／`durF` 就一格都不動，
+  所有寫死的時間點、字幕、章節、SRT 全部繼續有效：
+  1. 先快照受影響 cue 的舊 mp3 秒數（改詞庫會換 hash，舊檔不會被覆蓋，可直接 `ffprobe`）
+  2. 重抽時**保留最短的一版**（不要像我第一版迴圈那樣「不夠短就丟掉」，會把 8.975s 的好 take 洗掉）
+  3. 比原本短 → `apad` 補靜音到精確秒數；比原本長 → 先裁尾端靜音，剩餘用 `atempo`（≤3% 聽不出來）吸收
+  4. 重跑 builder 重新 probe，驗 `total` 與所有 `startF`／`durF` 歸零偏移
+  殘差：補靜音只能到毫秒級，次幀誤差沿 `t += dur + GAP` 累積，偶爾讓某個 `round(t*30)` 翻 1 幀（33ms）。
+  EP02 實測 15 個場景切點只有 2 個各飄 1 幀——相較於不做正規化的**累積 178 幀（5.9 秒）漂移**，這是可接受的代價。
+- **⚠️「這些詞 MiniMax 讀得對」的白名單本身要存疑。** ai-agent-eli5 的 `voice-style.md` 曾把「執行」
+  列進「讀得對、不用閃」，EP02 實測唸成 zhí **háng**。沒有實聽過就別把任何詞放進白名單——
+  「常見搭配所以應該沒問題」是猜測不是證據。錯誤的白名單比沒有白名單危險，因為它讓人不去查證。
 
 ## 動畫（vid-animator）— Remotion
 - 元件：`remotion/src/components.tsx`(Reveal/SceneTitle/Chip/Card)、`theme.ts`、`fonts.ts`(codeFamily)。每集寫 `scenesNN.tsx` + `EpisodeNN.tsx`（從 manifest `epNNData.ts` 的 EP NN 自動排場景）+ 註冊 `Root.tsx`。
+- **⛔ 畫面上不要出現內部場景編號（`SCENE 01 — …`）。** 那是製作用的鷹架，不是給觀眾看的。
+  EP02 把 14 處終端機視窗標題與 Kicker 都寫成 `SCENE NN — 描述`，作者看片時退件。
+  保留描述文字即可（`title="介面決定上限"`），版面不變。
 - 共用 `Narration`/`Subtitles`（吃 `cues` prop）。
 - **字幕 cues 必用真實語音時間戳**：配音定稿後跑 `python3 tools/build_subtitle_cues.py --ep N`，
   它會**同時**產 `voiceover/cues/epNN_cues.json`（來源）與 `remotion/src/epNNCues.ts`（Remotion 吃的）。
