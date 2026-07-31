@@ -38,7 +38,12 @@
 - **純音檔 QC 迴圈**：concat 旁白成 mp3 給使用者聽、先鎖發音再渲染影片。QuickTime 重開要先 `quit` 再 `open`（同路徑不自動 reload）。
 - 讀錯字 → 加 `voiceover/tw_lexicon.json`（`詞:"(pin1)(yin1)"`，輕聲用 `(le5)`；別加單字詞條）。頑固破音字（如「當機」）→ 直接換詞。
 - **⚠️ pronunciation_dict 會干擾斷句，能不加就不加（2026-06 EP6 定案）**：送 MiniMax 的 `pronunciation_dict` 不只可能無效，還會**把同句其他詞的斷句搞壞**（EP6 替「移植」加 dict→移植仍唸錯、還連帶把「影響」斷壞；移除 dict 後移植本來就唸對 yi2、斷句也順）。**加任何詞庫條目前先確認「不加 dict 時本來就唸錯」**——很多詞（如「移植」，移無他讀）MiniMax 預設就對，加了反而害事。每個新條目都要：①真的會唸錯才加 ②用 clip 給使用者耳朵確認「加了真的修好、且沒弄壞別處」，沒確認別留。
-- 斷句怪／詞被切開 → **改寫腳本**（非詞庫）。
+- 斷句怪／詞被切開 → 先重抽 take；**重抽解不掉就外科手術，最後才改腳本**。
+  EP02 的「視野」被唸成「視｜野」是**系統性**的（前面是「工程，」，MiniMax 固定在逗號後起音、
+  再於「視」之後換氣），**連抽 27 次只有 1 次乾淨**。這種靠重抽是浪費 API 費用。
+  外科手術做法：用 forced-align 定出詞內靜音的精確區間（EP02 是 1.579–1.921s），
+  `atrim`＋`concat` 把它剪掉、**只留 60ms 自然銜接**，再 `apad` 補回原長度。
+  結果乾淨、腳本不動、時間軸不動。判準：**重抽 ≥10 次仍不乾淨就別再抽了**。
 - **🚪 斷句 QC（render 前必做，每集沿用；2026-06 EP6 定案）**：MiniMax 常把詞中插微停頓（治療→「治｜療」、約定→「約｜定」）。判官**一律用 `voiceover/verify_phrasing.py`**（ffmpeg 物理偵測真實靜音＋whisper 只定位→jieba 判詞內），**不要信 `phrasing_gate.py`**——後者用 whisper 內插字級時間、±1 字漂移、**大量把標點旁停頓誤報成詞內切（假陽性）**，照它修會狂修假陽性又漏真缺陷。
   - ⚠️ `verify_phrasing.py` 內 `WhisperModel` 必須用 **`"small"`**（"medium" 在本機 CPU 會卡死）。
   - 流程：① `voiceover/.venv-phrasing/bin/python voiceover/verify_phrasing.py <該句純mp3> --fix`（逐句；報「斷錯 N 處」，N>0 時自動剪詞內靜音輸出 `{hash}_fixed.mp3`、原檔不動）→ ② `mv {hash}_fixed.mp3 {hash}.mp3` 覆蓋 → ③ 重跑 builder（re-probe 時長、重排 onset）→ ④ 再 verify 確認「斷錯 0」。
@@ -58,7 +63,9 @@
   **正解：重抽後把 mp3 正規化回原本的精確秒數**，`startF`／`durF` 就一格都不動，
   所有寫死的時間點、字幕、章節、SRT 全部繼續有效：
   1. 先快照受影響 cue 的舊 mp3 秒數（改詞庫會換 hash，舊檔不會被覆蓋，可直接 `ffprobe`）
-  2. 重抽時**保留最短的一版**（不要像我第一版迴圈那樣「不夠短就丟掉」，會把 8.975s 的好 take 洗掉）
+  2. 重抽時**保留目前最好的候選**（EP02 同一個 session 犯了三次：迴圈寫成「不夠好就丟掉」，
+     把 cue74 的 8.975s、cue223 唯一乾淨的那個 take 全洗掉了，白跑十幾輪）。
+     best-of-N 取樣一律先存最佳候選，最後再決定用不用。
   3. 比原本短 → `apad` 補靜音到精確秒數；比原本長 → 先裁尾端靜音，剩餘用 `atempo`（≤3% 聽不出來）吸收
   4. 重跑 builder 重新 probe，驗 `total` 與所有 `startF`／`durF` 歸零偏移
   殘差：補靜音只能到毫秒級，次幀誤差沿 `t += dur + GAP` 累積，偶爾讓某個 `round(t*30)` 翻 1 幀（33ms）。
@@ -88,6 +95,9 @@
   - 單場景渲染：獨立 composition，或 `npx remotion render src/index.ts EpNN render/scenes/sNN.mp4 --frames=<startF>-<endF>`。
   - **驗證優先用 Remotion Studio 即時預覽**（`npx remotion studio`，拖播放頭到該秒、0 等待），不要為了「看一眼對不對」就渲染；要產檔再渲。審查階段可 `--scale=0.5` 快渲、最後才全解析度跑一次。
   - 仍先 `still` 抽幀驗關鍵時刻。場景之間切點要乾淨（無跨場景動畫），concat 才不破。
+  - ⛔ **渲染進行中絕對不要動素材。** Remotion 是從 `http://localhost:3000/public/...` 逐幀抓音檔的，
+    你在另一條線 `rm` 掉一支 mp3 去重抽，正在渲那一句的場景會拿到 **404 直接中止**（EP02 的 s08 就這樣掛掉、
+    連帶 s09–s14 全部沒渲成）。**素材（音檔／cues／manifest）定案之後才開渲；渲染中只能讀不能寫。**
   - ⚠️ **重錄/換某場景旁白 wav 時，務必同步更新 `remotion/public/voiceover/`**（`staticFile` 讀 public，不是 `episodes/*/voiceover/`）。只改 episodes 而忘了 public → render 讀到舊音，會出現「畫面對、但旁白在舊長度之後變靜音（-inf）」。重渲前先 `ffprobe` 比對 public 那支 wav 的長度是否＝最新版。
 
 ## 三個必守的抖動鐵則（vid-art-director 把關）
