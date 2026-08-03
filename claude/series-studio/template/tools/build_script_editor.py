@@ -41,6 +41,22 @@ def load_colors():
     return c
 
 
+# 實測值（EP01，MiniMax 克隆聲 @ speed 1.15）：2525 字 / 422.9 秒 = 5.97 字/秒。
+# 換算成 speed 1.0 的基準 ≈ 5.19 字/秒。舊常數 4.3 把 7.0 分的稿估成 9.8 分，
+# 誤差 40%，害編劇照著寫出來的集數長度全部不對——所以這裡改用實測值 × 系列語速。
+BASE_CPS = 5.19  # 字/秒 @ speed 1.0
+
+
+def chars_per_min():
+    speed = 1.0
+    p = Path("series.yaml")
+    if p.exists():
+        m = re.search(r'^\s*speed:\s*([0-9.]+)', p.read_text(encoding="utf-8"), re.M)
+        if m:
+            speed = float(m.group(1))
+    return BASE_CPS * speed * 60
+
+
 def license_markers():
     """從 series.yaml 抓授權署名的關鍵字，當作「不准掉」的護欄依據。"""
     marks = []
@@ -94,8 +110,40 @@ def assert_license_survives(md):
     return []
 
 
+def _content_lines(md):
+    """留下真正的內容行——空行與結構用的 `---` 由 build_md 自己補回，不算內容。"""
+    return [s for s in (l.strip() for l in md.split("\n")) if s and s != "---"]
+
+
+def assert_roundtrip_lossless(md):
+    """**任何**內容都必須撐得過 parse → 匯出，不只授權署名。
+
+    作者按「匯出 Markdown」拿到的就是 build_md 的結果，會拿去覆蓋原稿。
+    所以「parse 不認得的東西」＝「作者一按匯出就永久消失的東西」，而且畫面上
+    看不出來——這正是 assert_license_survives 當初要擋的那件事，只是那支
+    只盯著授權那幾行。EP07 這一輪踩到兩個它盯不到的：
+      ① 製作註記 374 行（整段沒有任何【畫面】/【旁白】標記）→ 只剩標題
+      ② 7 個【畫面】區塊（連續卡、中間刻意沒有旁白）→ 後一張覆蓋前一張
+    與其每踩一次補一個單點檢查，不如讓「內容不得減少」變成 build 的前提。
+    """
+    before = _content_lines(md)
+    after = _content_lines(build_md(parse_script(md)))
+    if before == after:
+        return []
+    missing = [l for l in before if l not in after]
+    if missing:
+        sample = "、".join(x[:26] for x in missing[:3])
+        return [f"🛑 有 {len(missing)} 行內容撐不過 parse→匯出，作者一按「匯出 Markdown」"
+                f"就會靜悄悄消失：{sample}…"]
+    if len(before) != len(after):
+        return [f"🛑 內容行數 parse 前 {len(before)}、匯出後 {len(after)}，有東西被複製或吃掉"]
+    return ["🛑 內容順序在 parse→匯出後改變了"
+            "（場景中段的散文目前的資料格式表達不了，請把它移到場景開頭）"]
+
+
 def parse_script(md):
-    """把腳本 md 解析成 [{type, ...}]。type: head/scene/marker/license。"""
+    """把腳本 md 解析成 [{type, ...}]。type: head/scene/marker/license。
+    scene 另有 `prose`：該段裡不屬於任何【畫面】/【旁白】的文字（製作註記就是）。"""
     lines = md.split("\n")
     n = len(lines)
     i = 0
@@ -118,6 +166,7 @@ def parse_script(md):
 
     cur = None
     blk = None
+    prose = []
 
     def new_block():
         return {"screen": "", "subtitle": "", "narration": ""}
@@ -130,19 +179,24 @@ def parse_script(md):
         blk = None
 
     def flush():
-        nonlocal cur, blk
+        nonlocal cur, blk, prose
         if cur:
             close_block()
+            # 尾端的空行與結構用的 --- 由 build_md 補回，不算內容。
+            while prose and (not prose[-1].strip() or prose[-1].strip() == "---"):
+                prose.pop()
+            cur["prose"] = "\n".join(prose).strip("\n")
             data.append(cur)
             cur = None
         blk = None
+        prose = []
 
     while i < n:
         line = lines[i]
         s = line.strip()
         if line.startswith("## "):
             flush()
-            cur = {"type": "scene", "title": line.rstrip(), "blocks": []}
+            cur = {"type": "scene", "title": line.rstrip(), "prose": "", "blocks": []}
             i += 1
             continue
         if s.startswith("〔") and s.endswith("〕"):
@@ -157,7 +211,10 @@ def parse_script(md):
             m = re.match(r'\*\*【(畫面|字幕|旁白)】\*\*', line)
             if m:
                 key = {"畫面": "screen", "字幕": "subtitle", "旁白": "narration"}[m.group(1)]
-                if blk is None or blk["narration"]:
+                # ⚠️ `blk[key]` 這個條件不可拿掉：同一種標記連續出現時（例如連著兩張
+                # 【畫面】卡、中間刻意沒有旁白），少了它第二張會直接覆蓋第一張，
+                # 匯出時靜悄悄少一張卡。EP07 因此掉了 7 個【畫面】區塊。
+                if blk is None or blk["narration"] or blk[key]:
                     close_block()
                     blk = new_block()
                 # 三種標記都可能跨行：【畫面】常是「同行開頭 + 續行」（例如片尾
@@ -178,6 +235,11 @@ def parse_script(md):
                     i += 1
                 blk[key] = "\n".join(([first] if first else []) + rest).strip()
                 continue
+            # 標記以外的行也要留著。製作註記整段就是這種——它沒有任何
+            # 【畫面】/【旁白】標記，舊版直接跳過，作者一按匯出就少了 374 行。
+            prose.append(line)
+            i += 1
+            continue
         i += 1
     flush()
     return data
@@ -255,6 +317,7 @@ TEMPLATE = r'''<!DOCTYPE html>
 <script>
 const ORIGINAL = __DATA__;
 const KEY = "__EPKEY__";
+const CPM = __CPM__;   // 字/分，實測值 × series.yaml 的 speed
 let data = load();
 function load(){ try{ const s=localStorage.getItem(KEY); if(s) return JSON.parse(s);}catch(e){} return JSON.parse(JSON.stringify(ORIGINAL)); }
 function save(){ localStorage.setItem(KEY, JSON.stringify(data));
@@ -268,9 +331,17 @@ function render(){
   data.forEach((item,idx)=>{
     if(item.type==="head"){ const d=document.createElement('div'); d.className="intro-note"; d.textContent="檔案標頭（匯出時保留）"; main.appendChild(d); return; }
     if(item.type==="marker"||item.type==="license"){ const d=document.createElement('div'); d.className="marker"; d.textContent=item.text; main.appendChild(d); addInsertBar(main,idx); return; }
+    // 只有散文、沒有任何【畫面】/【旁白】的段落＝製作註記。它是配音/動畫/SEO
+    // 的開工依據，不是要唸的東西，所以不給編輯，但匯出時原樣帶回去。
+    if(item.prose && !(item.blocks||[]).length){
+      const d=document.createElement('div'); d.className="intro-note";
+      d.textContent=item.title.replace(/^##\s*/,"")+"（匯出時原樣保留，不在這裡編輯）";
+      main.appendChild(d); addInsertBar(main,idx); return; }
     const card=document.createElement('div'); card.className="scene";
     const t=document.createElement('input'); t.className="scene-title"; t.value=item.title;
     t.oninput=()=>{item.title=t.value; save();}; card.appendChild(t);
+    if(item.prose){ const d=document.createElement('div'); d.className="intro-note";
+      d.textContent="本段另有註記文字，匯出時原樣保留"; card.appendChild(d); }
     const blocks=item.blocks||[]; const nb=blocks.length;
     blocks.forEach((b,bi)=>{
       if(nb>1){ const bl=document.createElement('div');
@@ -305,13 +376,14 @@ function addInsertBar(main,idx){
 }
 function updateTotals(){ let tot=0; data.forEach(i=>{ if(i.type==="scene") tot+=sceneWc(i); });
   document.getElementById('totalWords').textContent=tot;
-  document.getElementById('totalTime').textContent=(tot/(4.3*60)).toFixed(1); }
+  document.getElementById('totalTime').textContent=(tot/CPM).toFixed(1); }
 function buildMd(){ let out=[];
   data.forEach(item=>{
     if(item.type==="head"){ out.push(item.text+"\n\n---"); }
     else if(item.type==="marker"){ out.push("\n"+item.text+"\n\n---"); }
     else if(item.type==="license"){ out.push("\n"+item.text); }
     else{ let s="\n"+item.title+"\n";
+      if(item.prose) s+="\n"+item.prose+"\n";
       (item.blocks||[]).forEach(b=>{
         if(b.screen) s+="\n**【畫面】** "+b.screen+"\n";
         if(b.subtitle) s+="\n**【字幕】** "+b.subtitle+"\n";
@@ -342,6 +414,7 @@ def build_html(data, colors, title, epkey, dlname):
     html = html.replace("__ROOTVARS__", rootvars)
     html = html.replace("__DATA__", json.dumps(data, ensure_ascii=False))
     html = html.replace("__EPKEY__", epkey)
+    html = html.replace("__CPM__", f"{chars_per_min():.1f}")
     html = html.replace("__DLNAME__", dlname)
     html = html.replace("__TITLE__", title)
     return html
@@ -360,6 +433,8 @@ def build_md(data):
             out.append("\n" + item["text"])
         else:
             s = "\n" + item["title"] + "\n"
+            if item.get("prose"):
+                s += "\n" + item["prose"] + "\n"
             for b in item["blocks"]:
                 if b["screen"]:
                     s += "\n**【畫面】** " + b["screen"] + "\n"
@@ -393,6 +468,25 @@ SELFTEST_MD = """# EP99 — 測試
 第二段旁白。
 
 ---
+
+## 02 連續兩張畫面卡
+
+**【畫面】** 第一張卡：這張刻意沒有配對旁白。
+
+**【畫面】** 第二張卡：舊版會讓這張把上面那張蓋掉。
+
+**【旁白】**
+兩張卡講完才有這段旁白。
+
+---
+
+## 製作註記（不進畫面、不唸）
+
+這一段沒有任何【畫面】或【旁白】標記，整段都是給下游 agent 看的。
+
+| 欄 | 值 |
+| --- | --- |
+| 破音字 | 校準 jiào |
 """
 
 
@@ -400,9 +494,22 @@ def selftest():
     """跨行【畫面】曾經被靜悄悄吃掉，吃的還是授權署名。這裡守住。"""
     data = parse_script(SELFTEST_MD)
     scenes = [d for d in data if d["type"] == "scene"]
-    assert len(scenes) == 1, f"預期 1 個場景，實得 {len(scenes)}"
+    assert len(scenes) == 3, f"預期 3 個場景，實得 {len(scenes)}"
     blocks = scenes[0]["blocks"]
     assert len(blocks) == 2, f"預期 2 組 block，實得 {len(blocks)}"
+
+    # 連續兩張【畫面】卡（中間刻意沒有旁白）不可以互相覆蓋。
+    # EP07 因為這個 bug 掉了 7 個【畫面】區塊。
+    cards = [b["screen"] for b in scenes[1]["blocks"] if b["screen"]]
+    assert len(cards) == 2, f"連續畫面卡被吃掉了，預期 2 張，實得 {len(cards)}"
+    assert "第一張卡" in cards[0] and "第二張卡" in cards[1], "連續畫面卡的順序或內容不對"
+
+    # 沒有任何標記的段落（製作註記）要原樣留著。
+    # 它是 vid-voice / vid-animator / vid-seo 的開工依據，掉了三個 agent 一起做錯。
+    notes = scenes[2]
+    assert not notes["blocks"], "製作註記不該被解析成 block"
+    assert "破音字" in notes["prose"], "製作註記整段被吃掉了"
+    assert "校準 jiào" in notes["prose"], "製作註記的表格內容被吃掉了"
 
     # 續行必須完整保留
     assert "續行一" in blocks[1]["screen"], "跨行【畫面】的續行被吃掉了"
@@ -415,7 +522,20 @@ def selftest():
 
     # round-trip：重建後再解析必須完全一致
     assert parse_script(build_md(data)) == data, "parse → 匯出 → parse 不穩定"
-    print("✓ selftest 通過：跨行【畫面】保住、旁白不混指示、round-trip 穩定")
+
+    # 一行內容都不准少。這是上面那些個別 assert 的總量把關——
+    # 個別檢查只擋得住「我想得到的那幾種」，這條擋的是「還沒想到的那些」。
+    problems = assert_roundtrip_lossless(SELFTEST_MD)
+    assert not problems, "；".join(problems)
+
+    # 陰性對照：把修好的條件拿掉，selftest 必須失敗。
+    # 不驗這件事的話，「測試通過」有可能只是因為它根本沒在量。
+    broken = SELFTEST_MD.replace("**【畫面】** 第二張卡", "**【畫面】** 覆蓋測試")
+    lost = assert_roundtrip_lossless(broken.replace("## 製作註記（不進畫面、不唸）\n", ""))
+    assert lost, "陰性對照沒有失敗——代表這支檢查其實沒在量東西"
+
+    print("✓ selftest 通過：跨行【畫面】保住、連續卡不互相覆蓋、"
+          "製作註記整段保住、round-trip 零損失（含陰性對照）")
     return 0
 
 
@@ -454,8 +574,10 @@ def main():
                 for it in data if it["type"] == "scene"
                 for b in it.get("blocks", []))
     print(f"✓ 已生成 {out}")
-    print(f"  場景數：{scenes}｜旁白約 {words} 字｜約 {words / (4.3 * 60):.1f} 分")
-    problems = assert_license_survives(md)
+    cpm = chars_per_min()
+    print(f"  場景數：{scenes}｜旁白約 {words} 字｜約 {words / cpm:.1f} 分"
+          f"（{cpm:.0f} 字/分，實測 @ speed {cpm / (BASE_CPS * 60):.2f}）")
+    problems = assert_license_survives(md) + assert_roundtrip_lossless(md)
     for p_ in problems:
         print("  " + p_)
     if problems:
