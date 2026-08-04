@@ -18,7 +18,7 @@ description: 製作目前系列資料夾的某一集（通用 orchestrator / 製
    - 修法依序：fresh take（`retake_until_clean.py`）→ best-of-N（`pick_best_take.py`，最佳候選先留存）→ 系統性詞內斷句才用 `surgical_phrasing_fix.py`。任何 audio 改動後都重跑 builder，確認 manifest/hash/audio 齊全，再重跑 forced-align 到全片 exit 0。
    - forced-align 對中英文混合術語可能 tokenizer mismatch；英文字本身另用 medium 級轉錄 zoom 或耳朵核對，不能因 aligner 顯示 MISS 就亂剪。旁白、字幕、scene timeline 一律在這關與純音檔 QC 都通過後才鎖定。
 5. 🚪 **純音檔 QC 關**：concat 旁白給使用者聽，鎖定發音（QuickTime quit 再 open）。斷句已由 4b 把關，這關專注**發音／破音字／語氣**。
-6. **並行**：vid-music（BGM，片頭/本體可沿用）｜ vid-animator（scenesNN/EpisodeNN、實機 demo、render）｜ vid-art-director（審視覺，退件則動畫師修）。
+6. **並行**：vid-music（BGM，片頭/本體可沿用；素材與成品必過 `tools/bgm_qc.py --vocal`，有可辨識人聲就重生或換 seed）｜ vid-animator（scenesNN/EpisodeNN、實機 demo、render）｜ vid-art-director（審視覺，退件則動畫師修）。
 7. **組裝**：前言+片頭+本體(ducking) → `episodes/epNN/render/epNN_final.mp4`。
 8. **vid-seo**：metadata（章節時間戳組裝後重算）、置頂留言；縮圖交動畫師渲。
 9. 🚪 **成片關**：打開成片給使用者看整片。**明說 OK 才上架。**
