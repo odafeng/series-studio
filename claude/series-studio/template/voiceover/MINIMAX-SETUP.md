@@ -1,6 +1,6 @@
-# MiniMax 旁白設定（沿用 colon-and-code 流程）
+# MiniMax 旁白設定
 
-> 來源參考：`~/Desktop/Projects/colon-and-code-youtube/voiceover/`
+> 下列設定以 Series Studio template 為單一來源，不依賴任何個人專案路徑。
 > 本系列沿用同一個既有克隆聲音與逐句合成 pipeline。
 
 ## 1. 聲音 / 模型 / 端點
@@ -44,7 +44,7 @@ audio_setting = {"sample_rate": 44100, "format": "mp3"}
 
 ## 5. 台灣口音校正詞庫
 
-- 直接沿用 colon-and-code 的 `voiceover/tw_lexicon.json`（破音字、台灣讀音、術語齊全），
+- 從 template 的 `voiceover/tw_lexicon.json` 開始（破音字、台灣讀音、術語基底），
   再針對本系列**新增 Agent 術語**校正（待補，例如：智能體、循環、範式…先確認台灣讀音再加）。
 - 規則：長詞優先；**不要放單字條目**（會把字當獨立 token 斷開）；錯拼音比不加更糟。
 - 套用方式：掃描該句，命中的詞塞進 `payload["pronunciation_dict"]["tone"]`。

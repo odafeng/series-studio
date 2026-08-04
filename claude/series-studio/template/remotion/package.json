@@ -1,10 +1,11 @@
 {
-  "name": "hello-agents-remotion",
+  "name": "series-studio-remotion-template",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "studio": "remotion studio",
-    "render": "remotion render"
+    "render": "remotion render",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",

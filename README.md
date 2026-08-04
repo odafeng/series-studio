@@ -1,6 +1,22 @@
 # Series Studio
 
-設定驅動的 **YouTube 影片系列工廠**——一個「系列」= 一個資料夾，放固定設定檔，由一組專職 Claude Code subagent 與 skill 自動產出每一集（腳本 → 配音 → 動畫 → 實機 demo → BGM → 組裝 → SEO → 上架），並維護跨集 context。
+[![CI](https://github.com/odafeng/series-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/odafeng/series-studio/actions/workflows/ci.yml)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-agentic_workflow-D97757)](https://docs.anthropic.com/en/docs/claude-code)
+[![Remotion](https://img.shields.io/badge/video-Remotion-7652F4)](https://www.remotion.dev/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+**A production system for episodic video—not a one-shot video generator.**
+
+設定驅動的 **YouTube 影片系列工廠**：一個「系列」就是一份長期維護的 production context，由專職 Claude Code subagents 與 skills 完成腳本 → 事實查核 → 配音 → Remotion 動畫 → demo → BGM → SEO → 安全上架，並把每一集學到的規則留給下一集。
+
+```text
+series.yaml + sources + series-context.md
+                    │
+                    ▼
+ script ──▶ fact-check ──▶ voice ──▶ Remotion ──▶ QA gates ──▶ unlisted upload
+    ▲                                                        │
+    └──────────── cross-episode memory ◀──────────────────────┘
+```
 
 從 [hello-agents-video](https://github.com/odafeng/hello-agents-video) 的實戰製作抽象而來。
 
@@ -8,8 +24,8 @@
 ```
 claude/
   agents/vid-*.md            # 7 個專職 subagent：編劇/事實查核/配音/動畫/美術/音樂/SEO
-  agents/colon-and-code.md   # 系列主理人：Colon & Code（頻道 DNA / 安全鐵則 / QC gate / SEO）
-  agents/ai-storyteller.md   # 系列主理人：《AI 說書人》
+  agents/colon-and-code.md   # opinionated real-world example：技術頻道主理人
+  agents/ai-storyteller.md   # opinionated real-world example：說書頻道主理人
   skills/new-series/         # 建系列骨架
   skills/produce-episode/    # 一集 orchestrator（含三道審核關，回寫 context）
   skills/auto-produce-next/  # 排程自動製作下一集（無人工關 → unlisted，絕不 public）
@@ -22,12 +38,15 @@ claude/
     youtube/                 # 共用上傳工具 upload.py（OAuth 憑證不進 repo，見 youtube/README）
 ```
 
-> ⚠️ **活檔（`~/.claude/`）是唯一真相**；CONVENTIONS / agents / skills / template 有改就要
-> commit 回本 repo（規則見 CONVENTIONS.md「完工回灌」）。金鑰一律不進 repo。
+> [!IMPORTANT]
+> API keys、OAuth credentials、YouTube token 與 voice IDs 一律留在本機 `.env`／credential files，
+> 不可放進系列資料夾或 commit 到 repo。
 
 ## 安裝
 ```bash
-./install.sh            # 把 claude/* 合併進 ~/.claude/（不覆蓋你其他 agents/skills）
+./install.sh --dry-run  # 先預覽
+./install.sh            # 合併進 ~/.claude/；同名檔預設保留
+# ./install.sh --force  # 明確要求時才覆寫 Series Studio 的同名檔案
 # 把 MINIMAX_API_KEY 放到 ~/.claude/series-studio/.env（全系列共用）
 ```
 
@@ -49,3 +68,21 @@ claude/
 
 ## 設計理念
 拆細、可並行、有審核關；技術細節單一真實來源（`CONVENTIONS.md` + 各系列 `series.yaml`/`voice-style.md`）；詞庫與 `series-context.md` 跨集累積、愈做愈順。
+
+## 三道 publishing safety gates
+
+1. **Script gate**：來源、授權署名與口語稿人工確認。
+2. **Media gate**：旁白、字幕、畫面與 demo 數字一致。
+3. **Publish gate**：自動流程只允許上傳為 `unlisted`；改成 `public` 必須人工操作。
+
+## 測試
+
+```bash
+bash -n install.sh
+bash tests/test_install.sh
+python3 -m pytest -q
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE). 你放進新系列的原始素材仍各自受其原授權約束。

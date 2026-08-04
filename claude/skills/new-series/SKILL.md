@@ -20,4 +20,4 @@ description: 建立一個新的影片系列資料夾骨架（Series Studio）。
 
 ## 注意
 - Remotion 元件、破音字詞庫、BGM 腳本都是模板種子（已驗證），可直接用、會逐集累積。
-- YouTube 上傳沿用 colon-and-code 專案的 OAuth（見 CONVENTIONS.md）。
+- YouTube 上傳使用使用者自己的 OAuth credentials（見 CONVENTIONS.md）。
