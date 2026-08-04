@@ -13,6 +13,24 @@ SPEC.loader.exec_module(bgm_qc)
 
 
 class TemplateBgmVocalQcTests(unittest.TestCase):
+    def test_detection_resets_whisper_context_between_segments(self):
+        segment = SimpleNamespace(start=1, end=2, text="clear voice", no_speech_prob=0.1, avg_logprob=-0.2)
+
+        class Model:
+            def transcribe(self, path, **kwargs):
+                self.path = path
+                self.kwargs = kwargs
+                return iter([segment]), None
+
+        model = Model()
+        vocals = bgm_qc.detect_vocals("music.mp3", model)
+
+        self.assertEqual(model.path, "music.mp3")
+        self.assertFalse(model.kwargs["condition_on_previous_text"])
+        self.assertFalse(model.kwargs["vad_filter"])
+        self.assertEqual(model.kwargs["beam_size"], 5)
+        self.assertEqual([item["text"] for item in vocals], ["clear voice"])
+
     def test_rejects_speech_and_sung_phrases_but_ignores_low_confidence_music(self):
         segments = [
             SimpleNamespace(start=0, end=2, text="a clear voice", no_speech_prob=0.1, avg_logprob=-0.2),

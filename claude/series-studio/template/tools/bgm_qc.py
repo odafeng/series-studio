@@ -82,8 +82,13 @@ def filter_confident_vocal_segments(segments, max_no_speech=0.65, min_logprob=-1
 
 
 def detect_vocals(path, model):
-    """用已載入的 faster-whisper model 掃描人聲，避免每個檔案重載模型。"""
-    segments, _ = model.transcribe(str(path), vad_filter=False, beam_size=5)
+    """用已載入的 faster-whisper model 掃描人聲，並切斷長音檔的幻覺傳播。"""
+    segments, _ = model.transcribe(
+        str(path),
+        vad_filter=False,
+        beam_size=5,
+        condition_on_previous_text=False,
+    )
     return filter_confident_vocal_segments(segments)
 
 
