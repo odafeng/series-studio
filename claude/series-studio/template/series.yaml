@@ -8,11 +8,14 @@ length_target_min: 7           # 每集目標分鐘數
 # 主持人聲音（MiniMax 克隆聲）
 voice:
   provider: minimax
+  model: "speech-2.8-hd"
   voice_id: "moss_audio_xxxxxxxx"   # 你的克隆聲 ID
   speed: 1.15
   emotion: happy                    # happy / neutral / ...
   vol: 1.0
   pitch: 0
+  # 只改送 TTS 的文字，不改字幕；需要時再加，沒有就保持空 mapping。
+  tts_replacements: {}
 # 旁白口吻指南：見 ./voice-style.md（丟語料我可幫你抽）
 
 # 視覺風格（Remotion）

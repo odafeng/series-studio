@@ -9,5 +9,5 @@ fi
 python3 -m venv .venv-phrasing
 ./.venv-phrasing/bin/python -m pip install -q --upgrade pip
 ./.venv-phrasing/bin/python -m pip install -q -r requirements-phrasing.txt
-echo "✓ 完成。首次執行 verify_phrasing.py 會再下載 whisper small 模型（約 460MB）。"
-echo "  用法：voiceover/.venv-phrasing/bin/python voiceover/verify_phrasing.py <該句mp3> --fix"
+echo "✓ 完成。首次執行會下載 whisper small 與 forced-align model。"
+echo "  Release gate：voiceover/.venv-phrasing/bin/python voiceover/forced_align_phrasing.py --ep N"

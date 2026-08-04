@@ -47,7 +47,8 @@
 
 ## 配音（vid-voice）— `python3 tools/build_voice.py --ep N`
 - **本人配音（`voice.provider: self`）**：跳過 MiniMax 合成；改用 `python3 tools/build_recording_script.py --ep N` 產**錄音唸稿**（大字旁白＋每段建議檔名＋已錄進度），本人對著唸、錄成 `epNN-sceneNN.wav` 放 `episodes/epNN/voiceover/`，再 concat 做純音檔 QC。
-- 設定驅動（讀 series.yaml voice）。逐句合成、內容雜湊命名（含詞庫）→ 冪等、改發音自動重合成。
+- 設定驅動（讀 `series.yaml voice`）。MiniMax 模型以 `voice.model` 為唯一真相；新系列／新一集目前優先 `speech-2.8-hd`，`--model` 只供 A/B 或一次性覆寫。逐句合成、內容雜湊命名 → 冪等；hash 必須包含 **model、voice/audio settings、實際送 TTS 的文字、詞庫命中與 `tts_replacements`**，避免換模型仍誤吃舊 cache。
+- `voice.tts_replacements` 是**語音／字幕分離**：只替換送進 MiniMax 的文字，不改 script、`epNNData.ts` 或字幕。用於 `RL → R L`、`DeepSeek-R1-Zero → Deep Seek, R One, Zero` 這類英文術語黏讀；不要為了發音污染觀眾看到的文案。
 - **純音檔 QC 迴圈**：concat 旁白成 mp3 給使用者聽、先鎖發音再渲染影片。QuickTime 重開要先 `quit` 再 `open`（同路徑不自動 reload）。
 - 讀錯字 → 加 `voiceover/tw_lexicon.json`（`詞:"(pin1)(yin1)"`，輕聲用 `(le5)`；別加單字詞條）。頑固破音字（如「當機」）→ 直接換詞。
 - **⚠️ pronunciation_dict 會干擾斷句，能不加就不加（2026-06 EP6 定案）**：送 MiniMax 的 `pronunciation_dict` 不只可能無效，還會**把同句其他詞的斷句搞壞**（EP6 替「移植」加 dict→移植仍唸錯、還連帶把「影響」斷壞；移除 dict 後移植本來就唸對 yi2、斷句也順）。**加任何詞庫條目前先確認「不加 dict 時本來就唸錯」**——很多詞（如「移植」，移無他讀）MiniMax 預設就對，加了反而害事。每個新條目都要：①真的會唸錯才加 ②用 clip 給使用者耳朵確認「加了真的修好、且沒弄壞別處」，沒確認別留。
@@ -57,14 +58,16 @@
   外科手術做法：用 forced-align 定出詞內靜音的精確區間（EP02 是 1.579–1.921s），
   `atrim`＋`concat` 把它剪掉、**只留 60ms 自然銜接**，再 `apad` 補回原長度。
   結果乾淨、腳本不動、時間軸不動。判準：**重抽 ≥10 次仍不乾淨就別再抽了**。
-- **🚪 斷句 QC（render 前必做，每集沿用；2026-06 EP6 定案）**：MiniMax 常把詞中插微停頓（治療→「治｜療」、約定→「約｜定」）。判官**一律用 `voiceover/verify_phrasing.py`**（ffmpeg 物理偵測真實靜音＋whisper 只定位→jieba 判詞內），**不要信 `phrasing_gate.py`**——後者用 whisper 內插字級時間、±1 字漂移、**大量把標點旁停頓誤報成詞內切（假陽性）**，照它修會狂修假陽性又漏真缺陷。
-  - ⚠️ `verify_phrasing.py` 內 `WhisperModel` 必須用 **`"small"`**（"medium" 在本機 CPU 會卡死）。
-  - 流程：① `voiceover/.venv-phrasing/bin/python voiceover/verify_phrasing.py <該句純mp3> --fix`（逐句；報「斷錯 N 處」，N>0 時自動剪詞內靜音輸出 `{hash}_fixed.mp3`、原檔不動）→ ② `mv {hash}_fixed.mp3 {hash}.mp3` 覆蓋 → ③ 重跑 builder（re-probe 時長、重排 onset）→ ④ 再 verify 確認「斷錯 0」。
-  - 若 fresh-take 也想試：先 `rm` 該 mp3 再跑 builder（hash 不含詞庫/取樣，同文字會重抽一個新 take），再 verify。
-  - ⚠️ **含英文的句子**（如 Directed Acyclic Graph）whisper 對齊會亂、verify 結果不可信，別據此亂剪——靠耳朵。
+- **🚪 斷句 QC（render 前必做；2026-08 EP08 更新）**：MiniMax 仍可能把詞中插微停頓（上下文→「上｜下文」）。主判官用字級 forced align：
+  `voiceover/.venv-phrasing/bin/python voiceover/forced_align_phrasing.py --ep N`
+  長集可分批加 `--cue-start A --cue-end B`，但最後必須覆蓋所有 cue。CLI 契約：**exit 0＝乾淨、exit 1＝找到缺陷、exit 2＝aligner crash／對齊錯誤**；exit 2 絕不能當乾淨，要重跑該 cue 或人工查因。
+  - 自動修正順序：`retake_until_clean.py` fresh take → `pick_best_take.py` best-of-N（每輪先保留最佳候選）→ 重抽十次以上仍系統性失敗，才用 `surgical_phrasing_fix.py` 剪詞內靜音。修後重跑 `build_voice.py` re-probe／重排 onset，再跑 forced-align 到全片 exit 0。
+  - `verify_phrasing.py` 可保留作逐句輔助；舊 `phrasing_gate.py` 用 whisper 內插字級時間，±1 字漂移會大量誤報，不作 release gate。
+  - **中英文混合術語另做 English QC**：forced align 可能因 tokenizer 對 `DeepSeek-R1-Zero`、`On-Policy Distillation` 顯示 MISS。用 medium 級轉錄 zoom 或耳朵核對實際發音，不能只看 MISS 就亂剪。
+  - audio 改動會改 cue duration／後續 onset。旁白全片、manifest hash/audio、英文術語與純音檔使用者 QC 都鎖定後，才產 subtitle cues 與開始 render。
 - **改讀音會不會自動重配，取決於你用哪支合成器——先去讀那支的 hash 怎麼算，不要照抄本條**：
   - `build_storyteller.py`：hash **只含文字**，改詞庫後含該詞的句子**不會**重抽 → 要 `rm` 該 mp3 強制重配。
-  - `build_voice.py`（ai-agent-eli5 等）：hash **含 `lex_entries(text)`** → 改詞庫**會自動**重抽該句，不必手動 `rm`。
+  - `build_voice.py`（ai-agent-eli5 等）：hash 含 model、實際 audio text、voice/audio settings、`lex_entries(text)` 與 `tts_replacements` → 任一合成輸入改變都會自動重抽該句，不必手動 `rm`。
   EP02 一開始照本條的舊敘述以為要手動 `rm`，讀了原始碼才發現這支不用。**文件會跟程式碼脫節，hash 的定義在程式碼裡。**
 - 且 MiniMax **不一定吃** `詞/(pin1)(yin1)` 詞庫格式（EP6「移植」設 yi2 仍唸 yi4）；頑固者改測別的格式或**直接換詞**，並用 clip 給使用者耳朵確認。
 - 🔴 **2026-08-03 EP07 實證：`pronunciation_dict` 對 MiniMax 這個聲音是死的，不是「常常無效」。**

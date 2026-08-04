@@ -1,5 +1,6 @@
 # 斷句 QC 專用環境（voiceover/.venv-phrasing）
-# 只給 verify_phrasing.py 用，故意跟系列主環境隔離：faster-whisper 會拉進
-# ctranslate2/ av 等重依賴，不該污染其他工具。
+# 給 verify_phrasing.py 與 forced_align_phrasing.py 用，跟系列主環境隔離。
 faster-whisper==1.2.1
 jieba==0.42.1
+ctc_forced_aligner==1.0.2
+opencc-python-reimplemented==0.1.7

@@ -8,6 +8,7 @@
   python3 tools/build_voice.py --ep 3            # 合成第 3 集（缺的）
   python3 tools/build_voice.py --ep 3 --dry      # 只列句子驗斷句
   python3 tools/build_voice.py --ep 3 --limit 6  # 只合成前 6 句（試聽）
+  python3 tools/build_voice.py --ep 3 --model speech-2.8-hd  # 一次性 A/B
 
 輸出：remotion/public/audio/epNN/<hash>.mp3 + remotion/src/epNNData.ts(EP NN) + episodes/epNN/epNN.srt
 金鑰 MINIMAX_API_KEY：找 ./.env，再找 ~/.claude/series-studio/.env。
@@ -18,6 +19,7 @@ import yaml
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--ep", type=int, required=True)
+ap.add_argument("--model", help="覆寫 series.yaml 或既有 manifest 的 MiniMax speech model")
 ap.add_argument("--dry", action="store_true")
 ap.add_argument("--limit", type=int)
 args = ap.parse_args()
@@ -28,6 +30,7 @@ CFG = yaml.safe_load((ROOT / "series.yaml").read_text(encoding="utf-8"))
 V = CFG.get("voice", {})
 CLONE = V["voice_id"]; SPEED = V.get("speed", 1.15); EMOTION = V.get("emotion", "happy")
 VOL = V.get("vol", 1.0); PITCH = V.get("pitch", 0)
+TTS_REPLACEMENTS = {str(k): str(v) for k, v in V.get("tts_replacements", {}).items() if str(k)}
 FFPROBE = "/opt/homebrew/bin/ffprobe"
 FPS = 30; GAP_S = 0.14; SCENE_GAP_S = 0.42
 
@@ -35,6 +38,18 @@ SCRIPT = ROOT / "episodes" / f"ep{NN}" / "script" / f"ep{NN}-script.md"
 AUDIO_DIR = ROOT / "remotion" / "public" / "audio" / f"ep{NN}"
 TS_OUT = ROOT / "remotion" / "src" / f"ep{NN}Data.ts"
 SRT_OUT = ROOT / "episodes" / f"ep{NN}" / f"ep{NN}.srt"
+
+
+def existing_manifest_model():
+    """重抽舊集 cue 時沿用原 model；無 model 欄的 manifest 視為 legacy speech-02-hd。"""
+    if not TS_OUT.exists():
+        return None
+    text = TS_OUT.read_text(encoding="utf-8")
+    match = re.search(r'"model"\s*:\s*"([^"]+)"', text)
+    return match.group(1) if match else "speech-02-hd"
+
+
+MODEL = args.model or existing_manifest_model() or V.get("model", "speech-2.8-hd")
 
 
 def read_key():
@@ -46,7 +61,7 @@ def read_key():
     sys.exit("找不到 MINIMAX_API_KEY（放 ./.env 或 ~/.claude/series-studio/.env）")
 
 
-KEY = read_key()
+KEY = None
 LEX_PATH = ROOT / "voiceover" / "tw_lexicon.json"
 LEX = {k: v for k, v in (json.loads(LEX_PATH.read_text(encoding="utf-8")) if LEX_PATH.exists() else {}).items() if not k.startswith("_")}
 
@@ -68,6 +83,8 @@ def parse_script():
             mode = "narr"; continue
         if s.startswith("**【"):
             mode = None; continue
+        if s == "---":
+            mode = None; continue
         if mode != "narr" or not s:
             mode = mode if s else None
             continue
@@ -85,8 +102,34 @@ def caption_text(s):
     return s.rstrip("。").strip()
 
 
+def audio_text(sent):
+    text = sent.replace("「", "").replace("」", "").replace("『", "").replace("』", "")
+    for source in sorted(TTS_REPLACEMENTS, key=len, reverse=True):
+        text = text.replace(source, TTS_REPLACEMENTS[source])
+    return text
+
+
+def cue_hash(text, model=None):
+    selected_model = model or MODEL
+    material = {
+        "model": selected_model,
+        "voice": CLONE,
+        "speed": SPEED,
+        "emotion": EMOTION,
+        "vol": VOL,
+        "pitch": PITCH,
+        "audio": {"sample_rate": 44100, "format": "mp3"},
+        "audio_text": text,
+        "lex": lex_entries(text),
+    }
+    return hashlib.sha1(json.dumps(material, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def minimax(text):
-    payload = {"model": "speech-02-hd", "text": text, "stream": False,
+    global KEY
+    if KEY is None:
+        KEY = read_key()
+    payload = {"model": MODEL, "text": text, "stream": False,
                "voice_setting": {"voice_id": CLONE, "speed": SPEED, "vol": VOL, "pitch": PITCH, "emotion": EMOTION},
                "audio_setting": {"sample_rate": 44100, "format": "mp3"}}
     tones = lex_entries(text)
@@ -115,15 +158,15 @@ def main():
     parsed = parse_script()
     if args.limit:
         parsed = parsed[:args.limit]
-    print(f"解析到 {len(parsed)} 句")
+    print(f"模型 {MODEL}｜解析到 {len(parsed)} 句")
     if args.dry:
         for sc, s in parsed:
             print(f"  [{sc}] {s}")
         return
     cues, t, prev, srt = [], 0.0, None, []
     for i, (sc, sent) in enumerate(parsed):
-        at = sent.replace("「", "").replace("」", "").replace("『", "").replace("』", "")
-        h = hashlib.sha1((CLONE + str(SPEED) + EMOTION + str(VOL) + str(PITCH) + at + "".join(lex_entries(at))).encode()).hexdigest()[:12]
+        at = audio_text(sent)
+        h = cue_hash(at)
         mp3 = AUDIO_DIR / f"{h}.mp3"
         if not mp3.exists():
             mp3.write_bytes(minimax(at)); print(f"  ♪ {i:02d} [{sc}] {sent[:24]}…")
@@ -135,8 +178,8 @@ def main():
         cues.append({"i": i, "scene": sc, "text": cap, "src": f"audio/ep{NN}/{h}.mp3", "startF": round(t * FPS), "durF": round(dur * FPS)})
         srt.append(f"{len(srt)+1}\n{srt_ts(t)} --> {srt_ts(t+dur)}\n{cap}\n")
         t += dur + GAP_S
-    data = {"fps": FPS, "voice": CLONE, "total": round(t * FPS), "cues": cues}
-    TS_OUT.write_text(f"// AUTO-GENERATED by tools/build_voice.py --ep {args.ep}\nexport const EP{NN} = " + json.dumps(data, ensure_ascii=False, indent=2) + " as const;\n")
+    data = {"fps": FPS, "model": MODEL, "voice": CLONE, "total": round(t * FPS), "cues": cues}
+    TS_OUT.write_text(f"// AUTO-GENERATED by tools/build_voice.py --ep {args.ep} --model {MODEL}\nexport const EP{NN} = " + json.dumps(data, ensure_ascii=False, indent=2) + " as const;\n")
     SRT_OUT.write_text("\n".join(srt))
     print(f"\n✅ {len(cues)} 句  {t:.1f}s  → {TS_OUT.relative_to(ROOT)} (EP{NN})")
 

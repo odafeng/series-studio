@@ -12,8 +12,11 @@ description: 製作目前系列資料夾的某一集（通用 orchestrator / 製
 1. **vid-screenwriter**：取第 N 集素材、寫 `episodes/epNN/script/epNN-script.md`（本人口吻、忠於素材、**接 series-context**：不重複、回呼前集、兌現上集預告）。
 2. **vid-factchecker**：對素材逐點核；不過退回 1。
 3. 🚪 **腳本關**：`python3 tools/build_script_editor.py --ep N` 產**可編輯**的腳本編輯器 HTML，open 給使用者直接改旁白／插入自己的段落；使用者「匯出 Markdown」後用 edited.md 覆蓋 `epNN-script.md`（先 diff）。等使用者明說 OK 才往下。
-4. **vid-voice**：`tools/build_voice.py --ep N` 逐句合成、破音字詞庫、斷句改寫。
-   - **4b. 斷句 QC 關卡（render 前必跑，別省）**：**主用字級 forced-align 偵測器** `voiceover/.venv-phrasing/bin/python voiceover/forced_align_phrasing.py --ep N`（exit 1=有缺陷、0=乾淨）。字級對齊拿每字精準時間＋silencedetect＋jieba(內建繁→簡)，**精準列出「詞中間被唸斷」的真缺陷、不噴假陽性**（取代舊 whisper `phrasing_gate.py` 人工判候選——後者 ±1 字飄移會誤判、短句會漏，可留作輔助）。修法：刪偵測到的 cue mp3（破音字另補 `tw_lexicon.json`）→ `build_voice.py --ep N` 重合成（fresh take 通常一次修乾淨）→ **重跑偵測器確認歸 0**。⚠️ 重合成會位移後續 cue，若落在前言乾聲段（第一個正片場景前），組裝 BOUND 要用新 startF 重算、本體要重渲。
+4. **vid-voice**：`python3 tools/build_voice.py --ep N` 逐句合成。模型以 `series.yaml voice.model` 為唯一真相；MiniMax 目前優先用 `speech-2.8-hd`，臨時 A/B 才傳 `--model`，不要把舊 `speech-02-hd` 寫死在 agent 或 skill。
+   - builder 的 cache hash 必須包含 model、voice/audio settings、實際送 TTS 的文字、詞庫命中與 `tts_replacements`。`tts_replacements` 只改 MiniMax input，`epNNData.ts`／字幕仍保留原稿；適合 `RL`、`DeepSeek-R1-Zero` 等模型容易黏讀的英文術語。
+   - **4b. 斷句 QC 關卡（render 前必跑，別省）**：主判官用 `voiceover/.venv-phrasing/bin/python voiceover/forced_align_phrasing.py --ep N`。長集分批可加 `--cue-start A --cue-end B`；**exit 0＝乾淨、1＝找到缺陷、2＝對齊器錯誤**。exit 2 不可當 PASS，要重跑該 cue 或人工查明。
+   - 修法依序：fresh take（`retake_until_clean.py`）→ best-of-N（`pick_best_take.py`，最佳候選先留存）→ 系統性詞內斷句才用 `surgical_phrasing_fix.py`。任何 audio 改動後都重跑 builder，確認 manifest/hash/audio 齊全，再重跑 forced-align 到全片 exit 0。
+   - forced-align 對中英文混合術語可能 tokenizer mismatch；英文字本身另用 medium 級轉錄 zoom 或耳朵核對，不能因 aligner 顯示 MISS 就亂剪。旁白、字幕、scene timeline 一律在這關與純音檔 QC 都通過後才鎖定。
 5. 🚪 **純音檔 QC 關**：concat 旁白給使用者聽，鎖定發音（QuickTime quit 再 open）。斷句已由 4b 把關，這關專注**發音／破音字／語氣**。
 6. **並行**：vid-music（BGM，片頭/本體可沿用）｜ vid-animator（scenesNN/EpisodeNN、實機 demo、render）｜ vid-art-director（審視覺，退件則動畫師修）。
 7. **組裝**：前言+片頭+本體(ducking) → `episodes/epNN/render/epNN_final.mp4`。
