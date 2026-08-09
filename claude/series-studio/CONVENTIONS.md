@@ -4,9 +4,15 @@
 > 系列專屬參數一律從 `./series.yaml` 讀；口吻從 `./voice-style.md`；上下集 context 從 `./series-context.md`。
 
 ## 集長換算（實測，別再用猜的）
-**MiniMax 克隆聲 @ speed 1.15 ＝ 5.97 字/秒**（EP01 實測：2525 字 / 422.9 秒）。
+**⚠️ 這裡的 5.97 是某一個系列的數字，不是通用常數——每個系列自己量。**
+ml-for-drs 三集實測（旁白純 CJK ÷ 成片扣掉片頭的秒數）是 **5.14 / 5.17 / 5.19，真值 5.15**，
+比 5.97 低 16%。那個系列的 `series.yaml` 一開始照抄本檔的 5.97，`target_min: 12` 因此開出
+4298 字的配額，實際只該是 3708 字。編劇交稿時自己發現對不上、標了三個算法出來，才沒有照著錯的上限寫。
+**新系列的第一集出貨後，立刻用 `旁白純 CJK ÷ (成片秒數 − 片頭秒數)` 回算並寫進自己的 `series.yaml`。**
+
+**MiniMax 克隆聲 @ speed 1.15 ＝ 5.97 字/秒**（某系列 EP01 實測：2525 字 / 422.9 秒）。
 換算成 speed 1.0 的基準 ≈ **5.19 字/秒**，這是 `build_script_editor.py` 的 `BASE_CPS`。
-- 目標字數 = `target_min` × 60 × 5.97
+- 目標字數 = `target_min` × 60 × 該系列實測的字/秒
 - ⚠️ EP01 一開始用猜的 3.7 字/秒（＝11 分鐘要 2400 字），**誤差 61%**，導致編劇照著錯的上限
   把稿子從 3301 字砍到 2500，砍掉的都是真材料。錯誤的常數不會報錯，只會讓所有下游決策偏一點。
 - **各集目標長度不該一律相同**：引言/後記的素材量可能只有大章的 1/7，硬套同一個長度就是灌水。
@@ -62,6 +68,12 @@
   `voiceover/.venv-phrasing/bin/python voiceover/forced_align_phrasing.py --ep N`
   長集可分批加 `--cue-start A --cue-end B`，但最後必須覆蓋所有 cue。CLI 契約：**exit 0＝乾淨、exit 1＝找到缺陷、exit 2＝aligner crash／對齊錯誤**；exit 2 絕不能當乾淨，要重跑該 cue 或人工查因。
   - 自動修正順序：`retake_until_clean.py` fresh take → `pick_best_take.py` best-of-N（每輪先保留最佳候選）→ 重抽十次以上仍系統性失敗，才用 `surgical_phrasing_fix.py` 剪詞內靜音。修後重跑 `build_voice.py` re-probe／重排 onset，再跑 forced-align 到全片 exit 0。
+  - ⚠️ `retake_until_clean.py` 跟 `build_subtitle_cues.py` 都要用 **`voiceover/.venv-phrasing/bin/python`** 跑
+    （前者 import `phrasing_score` → `jieba`，後者要 `faster_whisper`）；系統 `python3` 會 ModuleNotFoundError。
+  - **🕐 重抽最便宜的時刻是「`scenesNN.tsx` 還不存在」的時候。** 那時沒有任何寫死的 `at={}` 或 `SCENES` 切點，
+    重跑 builder 就重算了全部 `startF`，**完全不需要做秒數正規化**。等動畫開工後才重抽，
+    就要付下面那四個步驟（快照舊秒數 → 保留最佳候選 → `apad`／`atempo` 正規化 → 重跑 builder 驗歸零）的代價。
+    所以斷句 QC 要在動畫開工前跑到全片乾淨，不要拖。
   - `verify_phrasing.py` 可保留作逐句輔助；舊 `phrasing_gate.py` 用 whisper 內插字級時間，±1 字漂移會大量誤報，不作 release gate。
   - **中英文混合術語另做 English QC**：forced align 可能因 tokenizer 對 `DeepSeek-R1-Zero`、`On-Policy Distillation` 顯示 MISS。用 medium 級轉錄 zoom 或耳朵核對實際發音，不能只看 MISS 就亂剪。
   - audio 改動會改 cue duration／後續 onset。旁白全片、manifest hash/audio、英文術語與純音檔使用者 QC 都鎖定後，才產 subtitle cues 與開始 render。
@@ -118,7 +130,12 @@
   它會**同時**產 `voiceover/cues/epNN_cues.json`（來源）與 `remotion/src/epNNCues.ts`（Remotion 吃的）。
   ⚠️ 這兩份以前是手工轉的，EP01 重配音後 json 更新了、ts 沒跟上，**差點讓整集字幕跑在舊講稿的時間軸上**——
   沒有任何檢查會發現。現在一步到位，不要手改 ts。
-- （舊版說明）`build_subtitle_cues.py --ep N`（whisper 每段 wav → srt → `voiceover/cues/epNN_cues.json`，`fromF/toF`＝真實語音時間、依語音停頓自然斷句）。字幕進出時間**一律取自此 cues，嚴禁用字數比例估算**（會「聲音比字幕快／字幕飄」）。cues 的 `text` 是 whisper 轉錄（base 有同音/技術詞錯），技術詞/人名對照 `script.md`【旁白】校正後再上字幕。有 `_short` 剪輯版的場景自動採用其 srt。
+- `build_subtitle_cues.py --ep N`（whisper 每段 wav → srt → `voiceover/cues/epNN_cues.json`，`fromF/toF`＝真實語音時間、依語音停頓自然斷句）。字幕進出時間**一律取自此 cues，嚴禁用字數比例估算**（會「聲音比字幕快／字幕飄」）。有 `_short` 剪輯版的場景自動採用其 srt。
+  - **⚠️ 本條原本寫「cues 的 `text` 是 whisper 轉錄（base 有同音/技術詞錯），要對照【旁白】校正後再上字幕」——那已經過時了。**
+    現在的工具是**用腳本原文當文字、只拿 whisper 的停頓當切分依據**，不存在轉錄錯誤。
+    ml-for-drs EP03 有 38 個英文詞（`stochastic gradient descent`、`class imbalance`、`confusion matrix`、
+    `type 1 error`…），照舊敘述應該慘不忍睹，實際逐句檢查**零錯誤**。
+    又一次「文件跟程式碼脫節」——只是這次脫節的方向是文件低估了工具。**看到可疑的敘述先去讀程式碼。**
 - **實機 demo（終端類）預設用合成 asciicast 鏈**（2026-06 EP6 起）：`generate_*_cast.py` 手工合成 asciicast v2（模仿 Claude Code TUI）→ `agg`（字體必含 Heiti TC）→ ffmpeg mp4。**鐵則：數字必須由實機真跑回填、絕不捏造**；畫面可合成。可重跑、無輸入法/睡眠/權限雷。工具鏈範例：colon-and-code `tools/capture/`（含 README、安全護欄：中性 prompt、不露 email/hostname）。
 - **真錄螢幕**（GUI/需要真螢幕的橋段，macOS）：⚠️先把輸入法切 ABC（`osascript ... key code 49 using control`）否則 keystroke 全形；用 `/opt/anaconda3/bin/python3`；`ffmpeg -f avfoundation -i "2"` 錄螢幕（需 Terminal 螢幕錄製權限）→ 裁終端機放大 + `tpad` 凍結補長 → `OffthreadVideo` 嵌入（明確尺寸、別蓋標題）。
 - **渲染＝逐場景輸出 + concat（標準流程，所有影片 agent 一律照做）**：本體**不要**整集一次渲染（改一個字得重跑數萬幀）。每個場景渲成獨立 mp4（`render/scenes/sNN.mp4`，全部用**相同編碼參數**：libx264 / yuv420p / 同 fps / 同解析度 / 同音訊參數），本體＝`ffmpeg -f concat -c copy` 拼接這些場景 mp4（拼接僅數秒）。
@@ -133,6 +150,22 @@
     你在另一條線 `rm` 掉一支 mp3 去重抽，正在渲那一句的場景會拿到 **404 直接中止**（EP02 的 s08 就這樣掛掉、
     連帶 s09–s14 全部沒渲成）。**素材（音檔／cues／manifest）定案之後才開渲；渲染中只能讀不能寫。**
   - ⚠️ **重錄/換某場景旁白 wav 時，務必同步更新 `remotion/public/voiceover/`**（`staticFile` 讀 public，不是 `episodes/*/voiceover/`）。只改 episodes 而忘了 public → render 讀到舊音，會出現「畫面對、但旁白在舊長度之後變靜音（-inf）」。重渲前先 `ffprobe` 比對 public 那支 wav 的長度是否＝最新版。
+
+## 畫面／旁白時間軸對不上（現有 gate 全部抓不到，ml-for-drs EP03 定案）
+
+`check_swap_overlap.py` 看的是兩層內容的**顯示區間交集**、`check_content_band.py` 看的是**有沒有墨**，
+OCR 看的是成片上**讀得到的字**。以下兩類缺陷三者都抓不到，因為畫面本身完全合法：
+
+1. **指涉物早退**：旁白說「從這四個數字，可以算出兩個核心指標」時，那四個數字已經淡出了（`hideAt` 早於該句）。
+2. **術語搶跑**：註解帶已經寫著「precision 看的是…」，但旁白還在講上一句，**兩行文字同時說不同的事**（早 2.7 秒）。
+
+只有把**畫面時間軸跟旁白 cue 時間軸並排逐幀對**才會現形。兩個實務心得：
+- **修一個就順手掃同一幀的其他層**：EP03 的第二個缺陷正是在驗證第一個的修正時發現的，比重新掃全片便宜太多。
+- **⚠️ 自己寫的掃描判準一定要做陽性對照。** EP03 動畫師第一版判準跑出「命中 0」，
+  拿兩個已知缺陷修正**前**的數值餵回去——**都沒命中**（一個消失點落在句子結尾而非中間、一個只比句子起點晚 4 幀）。
+  判準是死的，那個 0 毫無意義。換成能通過陽性對照的判準重做，才得到有意義的結果。
+  同一次還差點被另一個假象騙：內容帶掃描拿 y=600 當對照掃出 0，一度以為工具瞎了，
+  其實那裡本來就空白；改用真的有墨的位置重測才確認掃描器是活的。
 
 ## 三個必守的抖動鐵則（vid-art-director 把關）
 1. **CJK 標點逐幀抖** → 根容器 `textSpacingTrim:"space-all"` + `fontKerning:"none"`。
@@ -208,6 +241,17 @@
   **前提是每個場景改完就 commit**，否則中間版本無跡可循，只能全部重渲。
 
 三段 concat：前言(乾聲) + 片頭(intro.mp4 或渲染的 Intro) + 本體(輕 BGM ducking)。
+
+**⚙️ 這一整節已經寫成 `tools/assemble.py`（ml-for-drs EP03 起）**，含過期檢查、逐項量測與幀數對帳。
+新系列直接複製那支，不要再手打 ffmpeg——下面每一條都是它固定下來的判斷。
+
+- **⚠️ 片頭要對齊系列音量，直接 mux 會太大聲。** `intro_bgm.mp3` 整體 −18.0 LUFS，但成片只取**前 4.5 秒的起音段**，
+  比整支平均大聲。ml-for-drs EP01/EP02 出貨時片頭都是 **−19.6 LUFS**（比前後兩段高 2.0–2.3 dB），
+  EP03 未校正時是 **−17.5**（高 4.3 dB）——連看三集會聽到那一集片頭特別吵。
+  `assemble.py` 的做法是先 mux 一支探針、量 LUFS、算差值套 `volume=±X dB` 再正式產出，
+  目標值可用 `series.yaml` 的 `bgm.intro_target_lufs` 覆寫。
+  ⚠️ 診斷這種問題時**要拿已出貨且作者接受的集數當基準**，而且要抓對片頭位置——
+  各集 s00 長度不同（EP1 片頭在 37.03s、EP2 在 58.80s、EP3 在 45.77s），用固定時間點量會量到別的段落。
 - **片頭長度取視訊串流的幀數，不要取容器 duration**：容器可能因尾巴掛靜音音軌而較長
   （EP01 是 4.500s 畫面 vs 4.544s 容器）。信容器會讓整條字幕系統性偏 44ms。
   組裝時取 `intro.mp4` 的**視訊軌**配 `intro_bgm.mp3`，那條靜音軌本來就用不到。
@@ -227,7 +271,12 @@
    結果兩條線改同一批檔案、互相覆蓋渲染產物，還製造出「mp4 與原始碼不同調」這種本來不存在的問題。
 3. **審查者不要改被審者的原始碼。** 美術指導直接改 `scenes01.tsx` 並重渲覆蓋動畫師的產出，
    它自己報告裡的「不同調」正是這個動作造成的。**退件要具體到檔案與行號，修改由原作者做。**
-4. **審查結論一定要落地成檔案，不能只存在 agent 的 context 裡。**
+4. **⚠️ 等待迴圈用 `grep -q <完成字串>` 判完成時，先確認那個字串不是 append 進舊 log。**
+   ml-for-drs EP03 的動畫師用 `grep -q ALL_SCENES_DONE` 等批次，但上一批已經寫過那行到同一個 log，
+   迴圈立刻返回、它對**舊的** s03.mp4 抽了幀，差點回報錯的驗證結論。同一個 log 重複使用時要看出現次數或 mtime。
+   同理，`Bash` 背景任務回報的 exit code 是**整條命令**的，不是你關心的那支工具的——
+   `cmd | grep -v ...` 之後 `$?` 是 grep 的。**看工具自己印出來的結論，不要看 wrapper。**
+5. **審查結論一定要落地成檔案，不能只存在 agent 的 context 裡。**
    EP02 的動畫師渲完 15 支場景、自審找出 4 個 must-fix，還沒套用就撞到 API 用量上限被中斷，
    **transcript 沒留下來，那份清單直接消失**——產物在磁碟上、commit 在 git 裡，但「我知道哪裡有問題」
    是整條 pipeline 最脆弱的資產。凡是「已發現但未修復」的清單，一律當場寫成
