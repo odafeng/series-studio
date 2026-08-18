@@ -1,11 +1,19 @@
+.DS_Store
 .env
-token.json
-client_secret.json
-node_modules/
+.venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+node_modules/
+
+# Local credentials and generated authentication state
+client_secret*.json
+token.json
+claude/series-studio/youtube/*.json
+
+# Generated media and per-series outputs
+episodes/
 *.mp3
 *.mp4
 *.mov
 *.wav
-.DS_Store

@@ -1,5 +1,7 @@
 # MiniMax 旁白設定
 
+> 下列設定以 Series Studio template 為單一來源，不依賴任何個人專案路徑。
+
 Claude 在系列根目錄工作時，以 `series.yaml voice` 為唯一真相，不把 model、voice ID 或替換詞寫死在 agent prompt。
 
 ## 設定
