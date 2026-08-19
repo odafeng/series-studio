@@ -348,6 +348,30 @@ CONVENTIONS 已經有「gate 要先過陽性對照」（證明工具會叫），
 - 合規：描述含來源連結與授權(series.yaml license/attribution/source_url)，commercial:false → 不開營利。
 - 上傳用共用工具 `~/.claude/series-studio/youtube/upload.py`（OAuth creds 同夾、已快取，全系列共用）：`--file --metadata --privacy` → `--thumb` → `--comment`（API 不能置頂，提醒手動）。
 
+## 廣告 Short 產線（ml-for-drs 2026-08-19 定案，可複製到其他系列）
+
+系列廣告 Short（垂直 1080×1920、約 30–60s、燒字幕）的一站式流程，固化成一支命令：
+
+```bash
+python3 tools/build_short.py          # 配音 → 渲染 → BGM 混音
+python3 tools/build_short.py --upload # 上一步全做 + 上傳 unlisted
+```
+
+四份檔案各管一件事（要改哪邊改哪邊）：
+- `tools/build_short_intro_voice.py`：旁白文案 `NARRATION` 與 `SHORT_TTS`（唸法替換）。
+- `remotion/src/ShortIntro.tsx`：畫面與動效（Sequence 硬切 + `Pop` spring 彈跳 + `Float` 微浮動）。
+- `brand/shortIntro-metadata.json`：標題／描述／tags。
+- `tools/build_short.py`：產線本體（配音 → BGM → 渲染 → 混音 → 上傳）。
+
+**廣告語言（作者 2026-08-19 強調，與正片講課腔完全分開）**：
+- 鉤子＝痛點／慾望的日常問句，**不用術語當鉤子**。例：「在 AI 充斥的時代，是不是常常聽不懂大家在聊什麼術語？」「想寫點跟傳統統計不一樣的研究，卻不知道怎麼開始？」
+- **不要寫「第一集免費」**——每一集都免費，講「免費」反而不知所云；CTA 直接講行動（「從第一集開始看」）。
+- 不要把讀本/PWA 網址當 CTA——作者不公開 PWA，描述裡也不放。
+
+**BGM**：與正片「cold ambient、無鼓」相反，Short 用 **upbeat**（MiniMax music-2.6 prompt 寫在 `build_short.py` 的 `SHORT_BGM_PROMPT`）；鼓點是**加分不是退件**，正片的 bgm_qc 三關不套用。成品裁到成片長度＋尾段 3.5s 淡出，`volume 0.16` 墊在旁白下（不做 sidechain ducking，短片的輕床樂固定音量即可）。
+
+**轉場**：Sequence 硬切，不用 crossfade（跨疊會雙重曝光）；進場用 `spring` overshoot（悶的元凶是「卡片淡入淡出＋無配樂＋節奏慢」）。
+
 ## 觸及與入口（作者 2026-08-03 指示，五條）
 
 > 前提：**內容深度不是問題，槓桿在「開頭 5 秒、標題前 8 個字、縮圖、能不能獨立看懂」。**
