@@ -6,7 +6,7 @@
 
 步驟：
   1. 配音合成  tools/build_short_intro_voice.py（MiniMax 克隆聲，NARRATION 在此檔改）
-  2. BGM 生成  MiniMax music-2.6，upbeat（若 remotion/public/audio/shortIntro/bgm.mp3 不存在才生成）
+  2. BGM 生成  本機 MiniMax Music 3（tools/music3.py），upbeat（若 remotion/public/audio/shortIntro/bgm.mp3 不存在才生成）
   3. 渲染      Remotion ShortIntro（1080×1920，幀數讀 shortIntroData.ts 的 total）
   4. 混音      BGM 裁到成片長度 + 尾段淡出，volume 0.16 墊在旁白下 → brand/shortIntro_bgm.mp4
   5. 上傳      --upload 時用 brand/shortIntro-metadata.json 傳 unlisted
@@ -17,11 +17,9 @@
   - 標題/描述/tags：brand/shortIntro-metadata.json
 """
 import argparse
-import json
 import re
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
 ROOT = Path.cwd()
@@ -44,28 +42,22 @@ SHORT_BGM_PROMPT = (
 )
 
 
-def read_key():
-    for p in (ROOT / ".env", Path.home() / ".claude" / "series-studio" / ".env"):
-        if p.exists():
-            for line in p.read_text().splitlines():
-                if line.strip().startswith("MINIMAX_API_KEY"):
-                    return line.split("=", 1)[1].strip().strip('"').strip("'")
-    sys.exit("找不到 MINIMAX_API_KEY")
+SHORT_BGM_SEED = 21
 
 
 def gen_bgm():
-    payload = {"model": "music-2.6", "prompt": SHORT_BGM_PROMPT, "is_instrumental": True,
-               "audio_setting": {"sample_rate": 44100, "bitrate": 256000, "format": "mp3"}}
-    req = urllib.request.Request(
-        "https://api.minimax.io/v1/music_generation",
-        data=json.dumps(payload).encode(), method="POST",
-        headers={"Authorization": "Bearer " + read_key(), "Content-Type": "application/json"})
-    r = json.loads(urllib.request.urlopen(req, timeout=600).read())
-    if r.get("base_resp", {}).get("status_code") not in (0, None):
-        sys.exit(f"MiniMax error: {r['base_resp']}")
-    BGM_RAW.write_bytes(bytes.fromhex(r["data"]["audio"]))
-    dur = r.get("extra_info", {}).get("music_duration", 0) / 1000
-    print(f"✅ BGM 生成 {BGM_RAW} ({dur:.1f}s)")
+    """Short 的床樂。跟正片相反，這裡**要**鼓點——bgm_qc 的三關不套用（見 CONVENTIONS）。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from music3 import generate, structured_caption
+    caption = structured_caption(SHORT_BGM_PROMPT, bpm=112, instrumental=True)
+    # 這裡蓋掉 structured_caption 的「無鼓」預設：Short 要的就是那個 groove。
+    caption = caption.replace(
+        "Groove & Foundation Progression: No drums, no percussion, no hi-hats. "
+        "The pulse comes only from the sustained instruments.",
+        "Groove & Foundation Progression: A light, driving acoustic drum kit with "
+        "crisp hi-hats and a warm kick keeps an upbeat, steady groove throughout.")
+    out, meta = generate(caption, BGM_RAW, duration=35, seed=SHORT_BGM_SEED)
+    print(f"✅ BGM 生成 {out} (seed={meta['seed']})")
 
 
 def short_total_frames():

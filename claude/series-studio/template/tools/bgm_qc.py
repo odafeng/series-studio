@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """BGM 量測：素材鼓點／密度／長度／人聲關卡 ＋ 成品循環可偵測度 ＋ 接縫評分。
 
-`music-2.6` 有超過一半的機率無視 prompt 裡的 `no drums no percussion`
-（EP02 實測 7 支退 4 支）。沒有自動 QC 的話，鼓點會直接混進成片，
+生成模型有超過一半的機率無視 prompt 裡的 `no drums no percussion`
+（雲端 `music-2.6` 時代 EP02 實測 7 支退 4 支）。沒有自動 QC 的話，鼓點會直接混進成片，
 而且沒有任何人會發現——所以每支新素材都要先過這裡再留用。
+2026-08 後端換成本機 MiniMax Music 3 開源權重，**這三關照跑**：換模型不等於換掉 QC，
+新模型一樣會自己加鼓、自己開始哼，而且它的失敗率還沒有累積夠多樣本可以宣稱比較低。
 
 CLI：
     python3 tools/bgm_qc.py episodes/ep03/render/seed_*.mp3          # 基本關卡

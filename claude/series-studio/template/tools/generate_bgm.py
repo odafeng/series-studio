@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
-"""用 MiniMax music_generation 生成純樂器 BGM 種子 → remotion/public/audio/bgm_seed.mp3。
-model `music-2.6` + is_instrumental:true（純樂器、無人聲，單次最長 ~3 分鐘）。
-之後用 ffmpeg -stream_loop 接到 ≥ 影片長度，再做 ducking 混音。
+"""生成純樂器 BGM 種子 → remotion/public/audio/bgm_{preset}_seed.mp3。
+
+後端是**本機的 MiniMax Music 3 開源權重**（`tools/music3.py`），不是 MiniMax 雲端 API。
+`POST /v1/music_generation` 在 2026-08 對新用戶關閉（HTTP 410 / 2153），
+官方在錯誤訊息裡指向開源權重，所以改走那條。安裝步驟見 music3.py 的 docstring。
+
+CLI 與舊版相容（`--preset` / `--out` 照舊），另外多了：
+    --seed      同一個 seed ＋ 同一段 caption ＝ 同一段音樂。**BGM 從此可重生。**
+    --duration  秒數（預設 body 130、intro 30）
+    --steps     flow-matching 步數，上限 30
+
+之後仍然用 `tools/build_bgm.py` 做無縫 loop / 接長 / EQ / 定量增益，
+留用前仍然要過 `tools/bgm_qc.py`（含 `--vocal`）——換了後端不代表換掉 QC，
+Music 3 一樣可能自己加鼓、自己開始哼。
 """
-import argparse, json, re, sys, urllib.request, urllib.error
+import argparse
+import re
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-def read_key():
-    for p in (ROOT / ".env", Path.home() / ".claude/series-studio/.env"):
-        if p.exists():
-            for l in p.read_text().splitlines():
-                if l.strip().startswith("MINIMAX_API_KEY"):
-                    return l.split("=", 1)[1].strip().strip('"').strip("'")
-    sys.exit("找不到 MINIMAX_API_KEY（放 ./.env 或 ~/.claude/series-studio/.env）")
+sys.path.insert(0, str(HERE))
+from music3 import generate, structured_caption  # noqa: E402
 
-
-KEY = read_key()
 
 def series_prompt(preset):
     """series.yaml 的 `bgm.{preset}_prompt` 可覆寫下面的內建 preset。
@@ -37,8 +43,6 @@ def series_prompt(preset):
     return None
 
 
-
-
 # 通用 fallback；本系列的實際 prompt 寫在 series.yaml 的 bgm.intro_prompt / bgm.body_prompt。
 PRESETS = {
     "body": ("warm uplifting modern tech lofi, soft synth pads and mellow electric piano, "
@@ -48,28 +52,23 @@ PRESETS = {
               "rising swell with big impact hit and shimmer, modern tech brand intro, "
               "confident and grand, short and energetic"),
 }
+DEFAULT_DUR = {"body": 130, "intro": 30}
+DEFAULT_BPM = {"body": 76, "intro": 120}
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--preset", choices=list(PRESETS), default="body")
 ap.add_argument("--out")
+ap.add_argument("--seed", type=int, default=7)
+ap.add_argument("--duration", type=int)
+ap.add_argument("--steps", type=int, default=30)
 args = ap.parse_args()
+
 PROMPT = series_prompt(args.preset) or PRESETS[args.preset]
 OUT = Path(args.out) if args.out else ROOT / "remotion" / "public" / "audio" / f"bgm_{args.preset}_seed.mp3"
+DUR = args.duration or DEFAULT_DUR[args.preset]
 
-payload = {
-    "model": "music-2.6",
-    "prompt": PROMPT,
-    "is_instrumental": True,
-    "audio_setting": {"sample_rate": 44100, "bitrate": 256000, "format": "mp3"},
-}
-req = urllib.request.Request("https://api.minimax.io/v1/music_generation",
-                             data=json.dumps(payload).encode(), method="POST",
-                             headers={"Authorization": "Bearer " + KEY, "Content-Type": "application/json"})
-try:
-    r = json.loads(urllib.request.urlopen(req, timeout=600).read())
-except urllib.error.HTTPError as e:
-    sys.exit(f"HTTP {e.code}: {e.read().decode()[:400]}")
-if r.get("base_resp", {}).get("status_code") not in (0, None):
-    sys.exit(f"MiniMax error: {r['base_resp']}")
-OUT.write_bytes(bytes.fromhex(r["data"]["audio"]))
-dur = r.get("extra_info", {}).get("music_duration", 0) / 1000
-print(f"✅ {OUT}  ({dur:.1f}s)")
+caption = structured_caption(PROMPT, bpm=DEFAULT_BPM[args.preset], instrumental=True)
+out, meta = generate(caption, OUT, duration=DUR, steps=args.steps, seed=args.seed)
+print(f"✅ {out}  (seed={meta['seed']}, steps={meta['steps']}, ~{DUR}s)")
+print(f"   重生參數已寫入 {out.name}.json")
+print(f"   留用前先跑：python3 tools/bgm_qc.py --vocal {out}")

@@ -177,11 +177,18 @@ Never store the sudo password. API keys live in gitignored `.env`.
 - **BGM + ducking**: `<Audio src=bgm_long volume={f => (talk?0.05:0.14)*edgeFade}>` where
   `talk = VO.some(v=>f>=v.from && f<v.to)`. ⚠️ **bgm_long.mp3 MUST be ≥ video length** — loop it
   with `ffmpeg -stream_loop -1 -t <secs>`; re-extend whenever the episode grows or music cuts out.
-  Generate the seed with `voiceover/generate_bgm.py` → MiniMax `POST /v1/music_generation`, **model
-  `music-2.6` + `is_instrumental:true`** (lyrics NOT needed; pure instrumental, no vocals; ~3min/call,
-  returns `data.audio` hex) → `audio/bgm_seed.mp3` → loop to `audio/bgm_long.mp3`.
-  ⚠️ **絕對不要用 `music-1.5` + lyrics** — 那是唱歌模型,一定漏哼唱人聲,prompt 怎麼寫都沒用(踩過 2026-06-15)。
-  `is_instrumental` 只支援 music-2.5+/2.6/2.6-free。(舊的 `audio_ep6/bgm.mp3` 種子已隨刪檔遺失。)
+  Generate the seed with `tools/generate_bgm.py` → **local MiniMax Music 3 open weights**
+  (`tools/music3.py`, `mlx-community/MiniMax-Music3-4bit` on MLX) → `audio/bgm_seed.mp3`
+  → loop to `audio/bgm_long.mp3`.
+  🔴 **2026-08-22: the MiniMax cloud `music_generation` API is closed to new users** — every model
+  returns `HTTP 410 / 2153`, and the paid key is blocked too. Do not spend time on `music-2.6`,
+  `music-1.5` or `/v1/audio_generation` (404); that whole path is gone. The 2153 error itself points
+  at the open weights, which is what the local backend runs.
+  ⚠️ Music 3 has no `is_instrumental` flag. Pure instrumental comes from **lyrics that contain only
+  section tags** (`[intro]/[instrumental]/[outro]`) and no words — give it words and it will sing.
+  ✅ `--seed` makes BGM reproducible; the regeneration parameters land in `<asset>.json`, which must
+  be committed. (The old `audio_ep6/bgm.mp3` seed was lost with its files — that class of loss is
+  now recoverable as long as the sidecar survives.)
 
 ## Pipeline order (per episode)
 1. Write `voiceover/EP{N}_SCRIPT.md` (human-readable line-by-line, scene by scene). Get user OK.
@@ -205,7 +212,7 @@ Never store the sudo password. API keys live in gitignored `.env`.
 - 假資料：`generate_cohort_excel.py` → `remotion/public/cohort_extract.xlsx`(虛構 readmit_30d,含可識別欄+故意缺漏 factor)。⚠️ 絕不用真實大腸癌資料。
 - 旁白：`voiceover/build_cohort_ep1.py`(**逐句**合成,克隆聲 `moss_audio_ae939d41-…`,**speed 1.2、emotion happy**)。快取雜湊 = CLONE+SPEED+EMOTION+audio_text(改任一個會自動全部重合成)。**合成前去掉「」『』引號**(否則「欄」等被引號孤立會讀錯調/斷句);字幕端把 `零零一`→`001`(語音仍唸零零一)。輸出 `remotion/src/cohortEp1Data.ts`(cues 有 scene/startF/durF)+ `subs/cohort_ep1.srt`。
 - 台灣腔字典 `voiceover/tw_lexicon.json`:已收 還原(huan2yuan2)、視同、有沒有、欄(lan2)、處置(chu3)、暴露(pu4lu4)…。⚠️ 單字條目(如「夾」)會害該字被當獨立 token 斷開→只留完整詞(資料夾)。
-- BGM：`voiceover/generate_bgm.py`(見上,music-2.6 + is_instrumental)。
+- BGM：`tools/generate_bgm.py`(見上,本機 MiniMax Music 3 開源權重;雲端 API 已關)。
 - Remotion:`CohortEP1.tsx`(主 composition id **`cohortep1`**,讀 cohortEp1Data,逐句 Audio+字幕+CLI 標籤+四段實錄槽+BGM ducking)、`CohortKit.tsx`(ExcelPeek/FolderTree/**LightMonitor**[頂部對齊嵌實錄]/LightCaption/**CommandHint**[CLI 半透明說明])、`CohortSample.tsx`(標題卡/縮圖)。淺色:PAPER #f5f4ef、TEAL #12a594、CORAL #e8553e、SLATE #3b6ea5、SERIF Noto Serif TC。
 - 初學者友善:終端機橋段每個 CLI 指令疊**半透明說明標籤**(cd/git init/.gitignore/add+commit/remote+push…)。
 

@@ -224,8 +224,23 @@ CONVENTIONS 已經有「gate 要先過陽性對照」（證明工具會叫），
 - QC：相鄰幀 `ffmpeg ...blend=all_mode=difference,eq=contrast=20`；同幀對自己須全黑。不遮擋：標題/字幕不被內容蓋。
 
 ## BGM（vid-music）— `python3 tools/generate_bgm.py --preset intro|body`
-- MiniMax `music-2.6` + `is_instrumental:true`。接長 `ffmpeg -stream_loop -1 -t <秒>`。
-- **⚠️ `music-2.6` 有超過一半的機率無視 prompt 裡的 `no drums no percussion`**
+- 🔴 **2026-08-22：MiniMax 雲端 `music_generation` API 已對新用戶關閉，這條路死了。**
+  所有 model（`music-2.6` / `music-1.5` / `music-01` / `music-3`）一律 `HTTP 410`、
+  `status_code 2153`：「no longer available to new users」。本專案兩把金鑰都試過，
+  含 `MINIMAX_PAY_KEY`——**換付費金鑰不會繞過**。`/v1/audio_generation` 是 404，不存在。
+- **現行後端：本機跑 MiniMax Music 3 開源權重**（`tools/music3.py`）。
+  官方就是在 2153 的錯誤訊息裡指向 `MiniMaxAI/MiniMax-Music3` 的。
+  用社群量化的 `mlx-community/MiniMax-Music3-4bit`（9.2 GB），Apple Silicon 上 `mlx-audio` 推論。
+  實測 M4 Pro / 24 GB：30 秒素材約 4 分鐘（含載入模型）、130 秒約 15 分鐘，離線、零費用。
+  安裝一次即可，步驟見 `tools/music3.py` 的 docstring。
+- **Music 3 吃的是 Structured Caption，不是一行 tag 串。** 三段式：Global Metadata /
+  Vocal Details / Arrangement。餵一行 prompt 它會自由發揮（自己加鼓、自己開始唱）。
+  `structured_caption()` 會把 series.yaml 既有的一行式 prompt 包成骨架，所以舊設定檔不用改；
+  要完整控制就直接把三段式整段寫進 `series.yaml` 的 `bgm.*_prompt`。
+- **純樂器靠 lyrics 而不是旗標**：Music 3 沒有 `is_instrumental`。做法是 lyrics 只給
+  `[intro]/[instrumental]/[outro]` 段落標籤、一個字都不給。有字它就會唱。
+- 接長 `ffmpeg -stream_loop -1 -t <秒>`。
+- **⚠️ 生成模型有超過一半的機率無視 prompt 裡的 `no drums no percussion`**
   （EP02 實測 7 支退 4 支、EP05 實測 6 支退 3 支——**是常態不是偶發**）。
   沒有自動 QC 的話，鼓點會直接混進成片、沒有任何人會發現。**每支新素材都要過 `tools/bgm_qc.py` 三關才留用**：
   ① **鼓點** 高頻帶（>2kHz）起音的週期性自相關：乾淨床樂 r≈0.28，有鼓 0.71~0.85 → 退線 0.60。
@@ -262,11 +277,13 @@ CONVENTIONS 已經有「gate 要先過陽性對照」（證明工具會叫），
   EP05（8 ms + 60 ms 衰減尾）在 k≈1.09。**換配方要重跑自己的階梯，不同報告的校準表不可並排比較。**
   兩次都證實的共同盲區：k≲0.5（埋在床樂 RMS 之下）抓不到——那個強度在 0.15 音量 ＋ ducking 後
   也聽不見，可以接受，但**不能宣稱「這關能抓到所有鼓」**。
-- **⚠️ BGM 素材是全 pipeline 唯一「不可重生」的產物，但 `.gitignore` 把它當可重生的媒體排除掉了。**
-  配音（內容雜湊）與成片（Remotion）都能重跑重建，**但 MiniMax `music_generation` 沒有 seed 參數**——
-  同一條 prompt 再跑一次得到的是完全不同的音樂。而 `*.mp3` ＋ `episodes/*/render/` 都在 ignore 裡，
-  所以素材池是**單一副本、刪掉就永久消失、git 救不回來**，報告裡的「重建指令」也跟著失效。
-  素材要嘛 `git add -f` 納管、要嘛放進不被 ignore 的常設素材庫。（`bgm-qc.md` 同理，歷來都是 `-f` 進去的。）
+- **✅ BGM 現在可重生了（2026-08-22 換本機後端之後）。** 舊 MiniMax API 沒有 seed 參數，
+  同一條 prompt 再跑一次得到完全不同的音樂，所以 BGM 一度是全 pipeline 唯一「不可重生」的產物。
+  Music 3 有 `--seed`：`(caption, lyrics, duration, steps, seed)` 五個值決定輸出，
+  `music3.generate()` 會把它們寫成 `<素材>.json` sidecar。**重生靠的是那個 sidecar，不是音檔本身。**
+  → `*.mp3` 仍在 `.gitignore` 裡，但 **`*.mp3.json` 必須進版控**（`git add -f`），
+  否則 seed 一丟就退回舊世界。`bgm-qc.md` 同理，歷來都是 `-f` 進去的。
+  素材本身要不要一起 `git add -f`：現在只是省 15 分鐘 GPU，不再是「刪掉就永久消失」。
 - **⚠️ 集長超過 ~12 分鐘就不要用 `-stream_loop` 接長單一樂段。**
   循環可偵測度會隨圈數暴增，而且會露出諧波階梯——那是「同一段一直繞」的數學指紋，觀眾說不出哪裡怪但會疲勞。
   EP02 實測（100 秒樂段）：循環 4 次 r=0.743、只露 2 階；循環 16 次 r=0.938、露 5 階以上且階階都強。
@@ -368,7 +385,7 @@ python3 tools/build_short.py --upload # 上一步全做 + 上傳 unlisted
 - **不要寫「第一集免費」**——每一集都免費，講「免費」反而不知所云；CTA 直接講行動（「從第一集開始看」）。
 - 不要把讀本/PWA 網址當 CTA——作者不公開 PWA，描述裡也不放。
 
-**BGM**：與正片「cold ambient、無鼓」相反，Short 用 **upbeat**（MiniMax music-2.6 prompt 寫在 `build_short.py` 的 `SHORT_BGM_PROMPT`）；鼓點是**加分不是退件**，正片的 bgm_qc 三關不套用。成品裁到成片長度＋尾段 3.5s 淡出，`volume 0.16` 墊在旁白下（不做 sidechain ducking，短片的輕床樂固定音量即可）。
+**BGM**：與正片「cold ambient、無鼓」相反，Short 用 **upbeat**（prompt 寫在 `build_short.py` 的 `SHORT_BGM_PROMPT`，後端同樣是本機 Music 3；`gen_bgm()` 會把 `structured_caption()` 的「無鼓」預設**蓋掉**換成 driving groove）；鼓點是**加分不是退件**，正片的 bgm_qc 三關不套用。成品裁到成片長度＋尾段 3.5s 淡出，`volume 0.16` 墊在旁白下（不做 sidechain ducking，短片的輕床樂固定音量即可）。
 
 **轉場**：Sequence 硬切，不用 crossfade（跨疊會雙重曝光）；進場用 `spring` overshoot（悶的元凶是「卡片淡入淡出＋無配樂＋節奏慢」）。
 
