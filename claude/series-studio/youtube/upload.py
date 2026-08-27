@@ -60,6 +60,10 @@ def main():
     ap.add_argument("--thumb", metavar="VIDEO_ID", help="set a custom thumbnail on an existing video")
     ap.add_argument("--thumb-file", default=str(HERE.parent / "remotion" / "out" / "thumb_1.png"))
     ap.add_argument("--metadata", default=str(METADATA), help="path to metadata json (title/description/tags)")
+    ap.add_argument("--captions", metavar="VIDEO_ID", help="upload an .srt caption track (replaces an existing track of the same language)")
+    ap.add_argument("--captions-file", help="path to the .srt — must be on the FINISHED-VIDEO timeline (episodes/epNN/render/epNN.srt), not the narration one")
+    ap.add_argument("--captions-lang", default="zh-Hant", help="BCP-47 language code (default zh-Hant)")
+    ap.add_argument("--captions-name", default="中文（繁體）", help="track name shown in the CC menu")
     ap.add_argument("--playlist", metavar="VIDEO_ID", help="add a video to the playlist given by --playlist-id")
     ap.add_argument("--playlist-id", help="target playlist id for --playlist")
     ap.add_argument("--comment", metavar="VIDEO_ID", help="post a top-level comment on a video (text from --comment-text / --comment-file). Note: YouTube API cannot PIN — pin manually in Studio/app.")
@@ -85,6 +89,35 @@ def main():
         except HttpError as e:
             sys.exit(f"YouTube API error {e.resp.status}: {e.content.decode()[:400]}")
         print(f"✅ thumbnail set ({Path(args.thumb_file).name}) → https://youtu.be/{args.thumb}")
+        return
+
+    if args.captions:
+        # ⚠️ 這個功能一直缺著，於是 EP01–EP03 上架後全都沒有 CC 軌——畫面燒了字幕，
+        # 但 YouTube 搜尋、自動翻譯、無障礙讀屏全部吃不到。每集的交付清單都寫「記得手動上傳」，
+        # 然後每集都沒人做。該修的是工具，不是提醒。
+        # 需要 youtube.force-ssl scope（SCOPES 早就有了，不必重新授權）。
+        cf = Path(args.captions_file)
+        if not cf.exists():
+            sys.exit(f"找不到字幕檔：{cf}")
+        # 先看有沒有同語言的舊軌，有就換掉（否則會出現兩條重複字幕）
+        try:
+            existing = youtube.captions().list(part="snippet", videoId=args.captions).execute()
+        except HttpError as e:
+            sys.exit(f"YouTube API error {e.resp.status}: {e.content.decode()[:400]}")
+        dup = [t for t in existing.get("items", [])
+               if t["snippet"]["language"] == args.captions_lang]
+        for t in dup:
+            youtube.captions().delete(id=t["id"]).execute()
+            print(f"   舊軌已移除：{t['snippet']['language']} / {t['snippet'].get('name') or '(無名)'}")
+        body = {"snippet": {"videoId": args.captions, "language": args.captions_lang,
+                            "name": args.captions_name, "isDraft": False}}
+        try:
+            r = youtube.captions().insert(part="snippet", body=body,
+                                          media_body=MediaFileUpload(str(cf))).execute()
+        except HttpError as e:
+            sys.exit(f"YouTube API error {e.resp.status}: {e.content.decode()[:400]}")
+        print(f"✅ captions uploaded ({cf.name}, {args.captions_lang}) → https://youtu.be/{args.captions}")
+        print(f"   track id {r['id']}｜Studio 可見需要幾分鐘")
         return
 
     if args.playlist:
