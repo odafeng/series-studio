@@ -60,11 +60,42 @@ def lufs(path):
 
 
 # ── 關卡④：可辨識人聲 ────────────────────────────────────────────
+# whisper 自己的「非語音註記」token。它**不是**有人在講或在唱，而是模型對整段音訊
+# 貼的標籤（`Music`／`[Music]`／`♪`）。EP06 踩到：出貨的 1350 s 蒙太奇被關卡④判退，
+# 六段全是文字「music」、no_speech=0.61（剛好在 0.65 退線內側）、六段讀數一字不差。
+# 證據鏈（三條，缺一不可）：
+#   ① 同一批樣本切成 0–95 s 與 0–300 s 兩個獨立檔案跑同一支 gate → 兩次都 PASS、零命中。
+#      「有人聲」被這條直接推翻：內容沒變，只有容器長度變了。
+#   ② 換 `--vocal-model medium` 重跑整支 → 一樣只命中 0–25 s，文字是 `Music`（大寫）。
+#      兩個模型給同一個標籤，指向註記行為而不是內容。
+#   ③ 該段的來源 `seed_i`（off 65–133 s）單獨跑人聲關乾淨。
+# 所以濾掉「整段文字只剩註記本身」的命中。判準刻意收得很窄——真的唱出 music 這個字的
+# 歌詞會帶其他字、正規化後不會落進這個集合，注入旁白的陽性對照也仍然照退（已複驗）。
+# ⚠️ 這條**不會**讓「無字哼唱」變得抓得到——那種本來就沒有文字可比，關卡④從頭到尾就抓不到。
+NONSPEECH_ANNOTATIONS = {
+    "music", "musica", "musique", "音楽", "音樂", "背景音樂",
+    "applause", "掌聲", "laughter", "笑聲", "silence", "blankaudio",
+    "nospeech", "sound", "noise", "inaudible", "subtitles", "字幕",
+}
+
+
+def is_nonspeech_annotation(text):
+    """整段文字只是 whisper 的非語音註記（`Music`／`[Music]`／`♪♪`）→ 不算人聲。"""
+    t = re.sub(r"[^0-9A-Za-z㐀-鿿]", "", text).lower()
+    if t:
+        return t in NONSPEECH_ANNOTATIONS
+    # 正規化後空白＝整段只有符號（`♪♪♪`、`...`）。但別把 CJK 以外的文字誤殺，
+    # 所以再用 \w 確認一次真的一個字都沒有。
+    return not re.search(r"\w", text)
+
+
 def filter_confident_vocal_segments(segments, max_no_speech=0.65, min_logprob=-1.0):
     """留下可辨識語音；也抓 no_speech 偏高、但內容長且轉錄信心高的歌聲。"""
     out = []
     for segment in segments:
         text = segment.text.strip()
+        if is_nonspeech_annotation(text):
+            continue
         units = re.findall(r"[A-Za-z']+|[\u3400-\u9fff]", text)
         strict_speech = segment.no_speech_prob < max_no_speech and segment.avg_logprob > min_logprob
         sung_phrase = (
