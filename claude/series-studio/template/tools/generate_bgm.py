@@ -55,20 +55,31 @@ PRESETS = {
 DEFAULT_DUR = {"body": 130, "intro": 30}
 DEFAULT_BPM = {"body": 76, "intro": 120}
 
-ap = argparse.ArgumentParser()
-ap.add_argument("--preset", choices=list(PRESETS), default="body")
-ap.add_argument("--out")
-ap.add_argument("--seed", type=int, default=7)
-ap.add_argument("--duration", type=int)
-ap.add_argument("--steps", type=int, default=30)
-args = ap.parse_args()
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--preset", choices=list(PRESETS), default="body")
+    ap.add_argument("--out")
+    ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--duration", type=int)
+    ap.add_argument("--steps", type=int, default=30)
+    args = ap.parse_args(argv)
 
-PROMPT = series_prompt(args.preset) or PRESETS[args.preset]
-OUT = Path(args.out) if args.out else ROOT / "remotion" / "public" / "audio" / f"bgm_{args.preset}_seed.mp3"
-DUR = args.duration or DEFAULT_DUR[args.preset]
+    prompt = series_prompt(args.preset) or PRESETS[args.preset]
+    out_path = (Path(args.out) if args.out else
+                ROOT / "remotion" / "public" / "audio" / f"bgm_{args.preset}_seed.mp3")
+    dur = args.duration or DEFAULT_DUR[args.preset]
 
-caption = structured_caption(PROMPT, bpm=DEFAULT_BPM[args.preset], instrumental=True)
-out, meta = generate(caption, OUT, duration=DUR, steps=args.steps, seed=args.seed)
-print(f"✅ {out}  (seed={meta['seed']}, steps={meta['steps']}, ~{DUR}s)")
-print(f"   重生參數已寫入 {out.name}.json")
-print(f"   留用前先跑：python3 tools/bgm_qc.py --vocal {out}")
+    caption = structured_caption(prompt, bpm=DEFAULT_BPM[args.preset], instrumental=True)
+    out, meta = generate(caption, out_path, duration=dur, steps=args.steps, seed=args.seed)
+    print(f"✅ {out}  (seed={meta['seed']}, steps={meta['steps']}, ~{dur}s)")
+    print(f"   重生參數已寫入 {out.name}.json")
+    print(f"   留用前先跑：python3 tools/bgm_qc.py --vocal {out}")
+    return out
+
+
+# ⚠️ 沒有這道 guard 的話，任何 `import generate_bgm` 都會直接跑一次生成
+#    （吃 15 分鐘 GPU、覆蓋既有素材，還會把呼叫端的 sys.argv 當成自己的參數解析）。
+#    2026-08-27 實際踩到：只想測 series_prompt() 能不能讀到 series.yaml，
+#    結果 import 就生出一支 43 秒的 bgm_body_seed.mp3。
+if __name__ == "__main__":
+    main()
